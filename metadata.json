@@ -1,0 +1,5 @@
+{
+  "name": "GCD Vector Graph",
+  "description": "An interactive infinite visualization of a number-theoretic vector field where connections are determined by the greatest common divisor of coordinates.",
+  "requestFramePermissions": []
+}
