@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Minus, RotateCcw, Move, Moon, Sun } from 'lucide-react';
 import { Viewport, ColorMode, Theme } from '../types';
 
@@ -10,6 +10,10 @@ interface ControlsProps {
   setColorMode: (m: ColorMode) => void;
   theme: Theme;
   setTheme: (t: Theme) => void;
+  transformFunc: string;
+  setTransformFunc: (s: string) => void;
+  hideComposites: boolean;
+  setHideComposites: (b: boolean) => void;
 }
 
 const Controls: React.FC<ControlsProps> = ({ 
@@ -18,8 +22,18 @@ const Controls: React.FC<ControlsProps> = ({
   colorMode, 
   setColorMode,
   theme,
-  setTheme
+  setTheme,
+  transformFunc,
+  setTransformFunc,
+  hideComposites,
+  setHideComposites
 }) => {
+  // Local state for input to prevent jitter while typing
+  const [funcInput, setFuncInput] = useState(transformFunc);
+
+  useEffect(() => {
+    setFuncInput(transformFunc);
+  }, [transformFunc]);
   
   const handleZoomIn = () => {
     setViewport({ ...viewport, zoom: Math.min(viewport.zoom * 1.2, 200) });
@@ -37,6 +51,17 @@ const Controls: React.FC<ControlsProps> = ({
     setTheme(theme === 'light' ? 'dark' : 'light');
   };
 
+  const commitFunc = () => {
+    setTransformFunc(funcInput);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+        commitFunc();
+        (e.target as HTMLInputElement).blur();
+    }
+  };
+
   const isDark = theme === 'dark';
   const panelClass = isDark 
     ? 'bg-gray-800/90 border-gray-700 text-gray-200' 
@@ -45,6 +70,10 @@ const Controls: React.FC<ControlsProps> = ({
   const btnClass = isDark
     ? 'bg-gray-800 text-gray-200 hover:bg-gray-700 border-gray-700'
     : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-200';
+    
+  const inputClass = isDark
+    ? 'bg-gray-900 border-gray-600 text-gray-200 focus:border-blue-500'
+    : 'bg-gray-50 border-gray-300 text-gray-800 focus:border-blue-500';
 
   return (
     <div className="absolute top-4 right-4 flex flex-col gap-2 items-end pointer-events-none">
@@ -57,11 +86,30 @@ const Controls: React.FC<ControlsProps> = ({
           Visualizing the vector field where node <code>(x,y)</code> connects to:
         </p>
         <ul className={`text-xs mt-1 ml-4 list-disc space-y-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-            <li><code>(x+1, y)</code> if coprime (East)</li>
-            <li><code>(x, y+1)</code> if shares factor (North)</li>
+            <li><code>(x+1, y)</code> if y does not divide x (East)</li>
+            <li><code>(x, y+1)</code> if y divides x (North)</li>
         </ul>
         
+        {/* Transform Input */}
         <div className="mt-4">
+            <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                Transform f(n):
+            </label>
+            <div className="flex gap-2">
+                <input 
+                    type="text" 
+                    value={funcInput}
+                    onChange={(e) => setFuncInput(e.target.value)}
+                    onBlur={commitFunc}
+                    onKeyDown={handleKeyDown}
+                    className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
+                    placeholder="e.g. 2x-1"
+                />
+            </div>
+            <p className="text-[9px] opacity-50 mt-1">Maps (a,b) &rarr; (f(a),f(b))</p>
+        </div>
+
+        <div className="mt-4 space-y-2">
             <label className={`flex items-center justify-between text-sm font-medium cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
                 <span>Color by Prime</span>
                 <input 
@@ -71,7 +119,19 @@ const Controls: React.FC<ControlsProps> = ({
                     onChange={(e) => setColorMode(e.target.checked ? ColorMode.PRIME_FACTOR : ColorMode.NONE)}
                 />
             </label>
-            <p className={`text-[10px] mt-1 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>Highlights partitions created by prime factors.</p>
+            
+            <label className={`flex items-center justify-between text-sm font-medium cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                <span>Hide Composites</span>
+                <input 
+                    type="checkbox" 
+                    className="w-4 h-4 accent-indigo-600 rounded"
+                    checked={hideComposites}
+                    onChange={(e) => setHideComposites(e.target.checked)}
+                />
+            </label>
+            <p className={`text-[10px] mt-1 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
+                Highlights partitions created by prime factors.
+            </p>
         </div>
 
         <div className="mt-4 pt-3 border-t border-gray-500/20 flex justify-between text-[10px] opacity-60 font-mono">

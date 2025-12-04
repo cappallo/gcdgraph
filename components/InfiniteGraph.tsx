@@ -1,6 +1,5 @@
-
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, getFactorColor, formatValue, getPartitionColor } from '../utils/math';
+import { gcd, getFactorColor, formatValue, getPartitionColor, createTransformFunction, isComposite } from '../utils/math';
 import { Viewport, ColorMode, Point, Theme } from '../types';
 
 interface InfiniteGraphProps {
@@ -8,57 +7,88 @@ interface InfiniteGraphProps {
   onViewportChange: (v: Viewport) => void;
   colorMode: ColorMode;
   theme: Theme;
+  transformFunc: string;
+  hideComposites: boolean;
 }
 
-const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChange, colorMode, theme }) => {
+const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ 
+  viewport, 
+  onViewportChange, 
+  colorMode, 
+  theme, 
+  transformFunc,
+  hideComposites
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const dragStartPos = useRef({ x: 0, y: 0 });
-  const animationFrameId = useRef<number>();
+  const animationFrameId = useRef<number>(0);
 
-  // Trace Path State: Stores the path from a clicked node back to (0,0)
+  // Trace Path State (Backward from click)
   const [tracedPath, setTracedPath] = useState<Point[] | null>(null);
 
-  // Clear trace on viewport change (pan/zoom)
+  // Custom Forward Paths (Forward from right-click)
+  const [customStarts, setCustomStarts] = useState<Point[]>([]);
+
+  // Create the transform function from string
+  const activeTransform = useMemo(() => {
+    return createTransformFunction(transformFunc);
+  }, [transformFunc]);
+
   useEffect(() => {
     setTracedPath(null);
-  }, [viewport]);
+  }, [viewport, transformFunc]);
 
-  // Pre-calculate "Rightmost" Partition Paths
-  // Paths starting from (n^3, n^2) for n=1..20
-  // These are rendered permanently overlaid on the graph
-  const partitionPaths = useMemo(() => {
-    const paths: { color: string, points: Point[] }[] = [];
-    const maxSteps = 3000; // Limit path length to avoid infinite loops in calculation
-
-    for (let n = 1; n <= 20; n++) {
-      const pathPoints: Point[] = [];
-      let currX = Math.pow(n, 3);
-      let currY = Math.pow(n, 2);
+  // Helper to trace a path forward from a given point
+  const traceForward = useCallback((startX: number, startY: number, maxSteps: number = 5000) => {
+    const points: Point[] = [];
+    let currX = startX;
+    let currY = startY;
+    
+    for (let step = 0; step < maxSteps; step++) {
+      points.push({ x: currX, y: currY });
       
-      for (let step = 0; step < maxSteps; step++) {
-        pathPoints.push({ x: currX, y: currY });
-        
-        // Graph logic: if coprime -> East, else -> North
-        if (gcd(currX, currY) === 1) {
-          currX += 1;
-        } else {
-          currY += 1;
-        }
-        
-        // Optimization: Stop if coords get absurdly large for our visualization purpose
-        if (currX > 10000 || currY > 10000) break;
+      const valX = Math.round(activeTransform(currX));
+      const valY = Math.round(activeTransform(currY));
+
+      // Graph logic: y | x -> North, else -> East
+      if (valY !== 0 && valX % valY === 0) {
+        currY += 1;
+      } else {
+        currX += 1;
       }
       
+      if (currX > 20000 || currY > 20000) break;
+    }
+    return points;
+  }, [activeTransform]);
+
+  // Pre-calculate "Rightmost" Partition Paths
+  const partitionPaths = useMemo(() => {
+    const paths: { color: string, points: Point[] }[] = [];
+    
+    for (let n = 1; n <= 20; n++) {
       paths.push({
         color: getPartitionColor(n),
-        points: pathPoints
+        points: traceForward(Math.pow(n, 3), Math.pow(n, 2))
       });
     }
     return paths;
-  }, []);
+  }, [traceForward]);
+
+  // Calculate user-defined custom paths
+  const customPaths = useMemo(() => {
+    return customStarts.map(start => {
+      // Deterministic color based on coordinates
+      const hue = ((start.x * 37 + start.y * 19) * 137.508) % 360;
+      return {
+        color: `hsl(${hue}, 90%, 55%)`,
+        points: traceForward(start.x, start.y)
+      };
+    });
+  }, [customStarts, traceForward]);
 
   // Rendering Loop
   const render = useCallback(() => {
@@ -67,22 +97,29 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
+    // Handle High DPI scaling correctly
+    const dpr = window.devicePixelRatio || 1;
+    
+    // Explicitly set the transform to match DPR.
+    // This ensures that CSS pixels map correctly to physical pixels.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Theme Colors
+    // Use logical CSS dimensions for calculation
+    // This fixes the offset issue where the graph was drawn at physical coordinates
+    const width = canvas.width / dpr;
+    const height = canvas.height / dpr;
+
     const isDark = theme === 'dark';
     const colors = {
       bg: isDark ? '#111827' : '#f3f4f6',
       grid: isDark ? '#374151' : '#d1d5db',
-      nodeCoprime: isDark ? '#1f2937' : '#ffffff', // Dark gray vs White
-      nodeFactor: isDark ? '#374151' : '#e5e7eb',  // Slightly lighter gray vs Light gray
+      nodeCoprime: isDark ? '#1f2937' : '#ffffff',
+      nodeFactor: isDark ? '#374151' : '#e5e7eb',
       text: isDark ? '#9ca3af' : '#374151',
       origin: '#fbbf24',
       tracePath: '#06b6d4',
     };
 
-    // Clear background
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, width, height);
 
@@ -90,90 +127,103 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
     const halfWidth = width / 2;
     const halfHeight = height / 2;
     
-    // Viewport bounds
     const minX = Math.floor(centerX - halfWidth / zoom);
     const maxX = Math.ceil(centerX + halfWidth / zoom);
     const minY = Math.floor(centerY - halfHeight / zoom);
     const maxY = Math.ceil(centerY + halfHeight / zoom);
 
-    // LOD Settings
     const showText = zoom > 30;
     const showNodes = zoom > 2;
     
-    // Helper to transform grid coord to screen coord
     const toScreen = (gx: number, gy: number) => ({
       x: (gx - centerX) * zoom + halfWidth,
       y: -(gy - centerY) * zoom + halfHeight
     });
 
-    ctx.lineWidth = Math.max(1, zoom / 10);
+    // Thicker connections (Twice as wide)
+    ctx.lineWidth = Math.max(2, zoom / 7.5);
     ctx.lineCap = 'round';
 
-    // 1. Draw Base Grid
-    // Optimization: Skip rendering loop if zoomed way out, handled by canvas speed mostly
     const totalNodes = (maxX - minX) * (maxY - minY);
     const skipFactor = totalNodes > 50000 ? Math.ceil(Math.sqrt(totalNodes / 50000)) : 1;
+
+    // Reduced node size to increase gap (0.6 instead of 0.8)
+    const nodeSize = Math.max(2, zoom * 0.6); 
 
     for (let gx = minX; gx <= maxX; gx += skipFactor) {
       for (let gy = minY; gy <= maxY; gy += skipFactor) {
         const { x: screenX, y: screenY } = toScreen(gx, gy);
-        const val = gcd(gx, gy);
-        const nodeSize = Math.max(2, zoom * 0.8); 
+        
+        // Calculate transformed value for logic
+        const valX = activeTransform(gx);
+        const valY = activeTransform(gy);
+        const vX = Math.round(valX);
+        const vY = Math.round(valY);
+        
+        // Logic: y | x -> North, else -> East
+        const goesNorth = vY !== 0 && (vX % vY === 0);
+        
+        // Use GCD for coloring/text purposes
+        const displayVal = gcd(vX, vY);
+        const isComp = isComposite(displayVal);
+        
+        // Hide 1s as well if hiding composites
+        const shouldHide = hideComposites && (isComp || displayVal === 1);
         
         if (showNodes) {
             // Connections
             ctx.strokeStyle = colors.grid;
-            ctx.lineWidth = Math.max(1, zoom / 15);
+            // Line width set globally above
             ctx.beginPath();
             ctx.moveTo(screenX, screenY);
             
-            if (val === 1) {
-                // East
-                const dest = toScreen(gx + 1, gy);
+            if (goesNorth) {
+                const dest = toScreen(gx, gy + 1);
                 ctx.lineTo(dest.x, dest.y);
             } else {
-                // North (y+1)
-                const dest = toScreen(gx, gy + 1);
+                const dest = toScreen(gx + 1, gy);
                 ctx.lineTo(dest.x, dest.y);
             }
             ctx.stroke();
 
             // Node Body
-            let fillColor;
-            if (colorMode === ColorMode.PRIME_FACTOR) {
-                fillColor = getFactorColor(val);
-            } else {
-                fillColor = val === 1 ? colors.nodeCoprime : colors.nodeFactor;
+            if (!shouldHide || (gx === 0 && gy === 0)) {
+                let fillColor;
+                if (colorMode === ColorMode.PRIME_FACTOR) {
+                    fillColor = getFactorColor(displayVal);
+                } else {
+                    fillColor = displayVal === 1 ? colors.nodeCoprime : colors.nodeFactor;
+                }
+                
+                ctx.fillStyle = fillColor;
+                const halfSize = nodeSize / 2;
+                
+                if (gx === 0 && gy === 0) {
+                     ctx.fillStyle = colors.origin; 
+                     ctx.strokeStyle = isDark ? '#000' : '#000';
+                     ctx.lineWidth = 2;
+                }
+                
+                ctx.fillRect(screenX - halfSize, screenY - halfSize, nodeSize, nodeSize);
             }
-            
-            ctx.fillStyle = fillColor;
-            const halfSize = nodeSize / 2;
-            
-            // Origin Highlight
-            if (gx === 0 && gy === 0) {
-                 ctx.fillStyle = colors.origin; 
-                 ctx.strokeStyle = isDark ? '#000' : '#000';
-                 ctx.lineWidth = 2;
-            }
-            
-            ctx.fillRect(screenX - halfSize, screenY - halfSize, nodeSize, nodeSize);
         }
 
         // Text
-        if (showText && skipFactor === 1) {
-             if (val > 1) {
-                const label = formatValue(val);
+        if (showText && skipFactor === 1 && (!shouldHide || (gx === 0 && gy === 0))) {
+             if (displayVal > 1) {
+                const label = formatValue(displayVal);
                 if (label) {
                     ctx.fillStyle = colors.text;
-                    const fontSize = Math.min(nodeSize * 0.6, 24);
+                    // Shrink font size by ~1/3 (0.4 multiplier instead of 0.6)
+                    const fontSize = Math.min(nodeSize * 0.4, 16);
                     ctx.font = `bold ${fontSize}px sans-serif`;
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
                     ctx.fillText(label, screenX, screenY);
                 }
             } else if (gx === 0 && gy === 0) {
-                 ctx.fillStyle = '#000'; // Origin text always black on yellow
-                 ctx.font = `bold ${Math.min(nodeSize * 0.6, 24)}px sans-serif`;
+                 ctx.fillStyle = '#000';
+                 ctx.font = `bold ${Math.min(nodeSize * 0.4, 16)}px sans-serif`;
                  ctx.textAlign = 'center';
                  ctx.textBaseline = 'middle';
                  ctx.fillText("0", screenX, screenY);
@@ -182,19 +232,20 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
       }
     }
 
-    // 2. Draw Partition Paths (Overlay)
-    // These are the "Rightmost" paths starting from (n^3, n^2)
-    partitionPaths.forEach(path => {
+    // Combine Partition Paths and Custom Paths
+    const overlayPaths = [...partitionPaths, ...customPaths];
+
+    // Draw Overlay Paths
+    overlayPaths.forEach(path => {
         ctx.strokeStyle = path.color;
-        ctx.lineWidth = Math.max(2, zoom / 8); // Thicker than normal lines
+        // Thicker overlay paths to match grid
+        ctx.lineWidth = Math.max(3, zoom / 5); 
         ctx.beginPath();
         
-        // Draw segments that are visible
         for (let i = 0; i < path.points.length - 1; i++) {
             const p1 = path.points[i];
             const p2 = path.points[i+1];
 
-            // Culling
             if (p1.x < minX - 1 && p2.x < minX - 1) continue;
             if (p1.x > maxX + 1 && p2.x > maxX + 1) continue;
             if (p1.y < minY - 1 && p2.y < minY - 1) continue;
@@ -208,33 +259,36 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
         }
         ctx.stroke();
 
-        // Draw nodes for this path
         if (showNodes) {
             for (const p of path.points) {
                 if (p.x < minX - 1 || p.x > maxX + 1 || p.y < minY - 1 || p.y > maxY + 1) continue;
                 
+                const valX = activeTransform(p.x);
+                const valY = activeTransform(p.y);
+                const val = gcd(Math.round(valX), Math.round(valY));
+                const isComp = isComposite(val);
+
+                // Apply hide logic to overlay paths too
+                if (hideComposites && (isComp || val === 1)) continue;
+                
                 const s = toScreen(p.x, p.y);
-                const nodeSize = Math.max(2, zoom * 0.8);
                 const halfSize = nodeSize / 2;
                 
-                // Draw Background
                 ctx.fillStyle = path.color;
                 ctx.fillRect(s.x - halfSize, s.y - halfSize, nodeSize, nodeSize);
                 
-                // Optional border
                 if (zoom > 10) {
                     ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)';
                     ctx.lineWidth = 1;
                     ctx.strokeRect(s.x - halfSize, s.y - halfSize, nodeSize, nodeSize);
                 }
 
-                // Text Re-draw on top of overlay
                 if (showText && skipFactor === 1) {
-                    const val = gcd(p.x, p.y);
                     const label = formatValue(val);
                     if (label) {
-                        ctx.fillStyle = '#ffffff'; // White text for contrast on dark partition color
-                        const fontSize = Math.min(nodeSize * 0.6, 24);
+                        ctx.fillStyle = '#ffffff'; 
+                        // Smaller font size here too
+                        const fontSize = Math.min(nodeSize * 0.4, 16);
                         ctx.font = `bold ${fontSize}px sans-serif`;
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
@@ -245,10 +299,10 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
         }
     });
 
-    // 3. Draw Traced Backward Path (User Interaction)
+    // Draw Traced Backward Path (Traced from pointer up)
     if (tracedPath && tracedPath.length > 0) {
         ctx.strokeStyle = colors.tracePath;
-        ctx.lineWidth = Math.max(3, zoom / 5); // Very thick
+        ctx.lineWidth = Math.max(4, zoom / 4);
         ctx.lineJoin = 'round';
         ctx.beginPath();
 
@@ -263,16 +317,13 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
         }
         ctx.stroke();
 
-        // Draw Trace Nodes Highlight
         if (showNodes) {
             for (const p of tracedPath) {
                  if (p.x < minX - 1 || p.x > maxX + 1 || p.y < minY - 1 || p.y > maxY + 1) continue;
 
                  const s = toScreen(p.x, p.y);
-                 const nodeSize = Math.max(2, zoom * 0.8);
                  const halfSize = nodeSize / 2;
                  
-                 // White center for contrast in trace
                  ctx.fillStyle = '#ffffff';
                  ctx.fillRect(s.x - halfSize, s.y - halfSize, nodeSize, nodeSize);
                  
@@ -280,13 +331,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
                  ctx.lineWidth = 2;
                  ctx.strokeRect(s.x - halfSize, s.y - halfSize, nodeSize, nodeSize);
 
-                 // Text Re-draw on top of overlay
                  if (showText && skipFactor === 1) {
-                    const val = gcd(p.x, p.y);
+                    const valX = activeTransform(p.x);
+                    const valY = activeTransform(p.y);
+                    const val = gcd(Math.round(valX), Math.round(valY));
                     const label = formatValue(val);
                     if (label || (p.x===0 && p.y===0)) {
-                        ctx.fillStyle = '#000000'; // Black text on white background
-                        const fontSize = Math.min(nodeSize * 0.6, 24);
+                        ctx.fillStyle = '#000000';
+                        const fontSize = Math.min(nodeSize * 0.4, 16);
                         ctx.font = `bold ${fontSize}px sans-serif`;
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
@@ -301,9 +353,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
         }
     }
 
-  }, [viewport, colorMode, partitionPaths, tracedPath, theme]);
+  }, [viewport, colorMode, partitionPaths, customPaths, tracedPath, theme, activeTransform, hideComposites]);
 
-  // Animation loop
   useEffect(() => {
     const loop = () => {
       render();
@@ -315,34 +366,32 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
     };
   }, [render]);
 
-  // Resize Handler
   useEffect(() => {
     const handleResize = () => {
       if (containerRef.current && canvasRef.current) {
         const dpr = window.devicePixelRatio || 1;
         const rect = containerRef.current.getBoundingClientRect();
+        
+        // Set physical pixel dimensions
         canvasRef.current.width = rect.width * dpr;
         canvasRef.current.height = rect.height * dpr;
+        
+        // Set CSS layout dimensions
         canvasRef.current.style.width = `${rect.width}px`;
         canvasRef.current.style.height = `${rect.height}px`;
         
-        const ctx = canvasRef.current.getContext('2d');
-        if (ctx) ctx.scale(dpr, dpr);
-        
+        // Removed explicit ctx.scale() here because render() manages the transform
         render();
       }
     };
-    
     window.addEventListener('resize', handleResize);
     handleResize();
     return () => window.removeEventListener('resize', handleResize);
   }, [render]);
 
-  // Path finding BFS logic
   const findPathToOrigin = (start: Point): Point[] => {
-    // BFS backwards
     const q: Point[] = [start];
-    const parent = new Map<string, Point | null>(); // Key: "x,y" -> Value: parent point
+    const parent = new Map<string, Point | null>();
     parent.set(`${start.x},${start.y}`, null);
     
     const visited = new Set<string>();
@@ -350,7 +399,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
 
     let foundOrigin = false;
     let steps = 0;
-    const maxSteps = 4000; // Increased safety break
+    const maxSteps = 4000;
 
     while (q.length > 0 && steps < maxSteps) {
         const curr = q.shift()!;
@@ -361,24 +410,28 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
             break;
         }
 
-        // Predecessor P connects to Curr if:
-        // 1. P = (curr.x - 1, curr.y) AND gcd(P.x, P.y) == 1 (Connects East to curr)
-        // 2. P = (curr.x, curr.y - 1) AND gcd(P.x, P.y) > 1 (Connects North to curr)
-
+        // Neighbors that could connect TO curr
         const candidates = [
-            { x: curr.x - 1, y: curr.y },
-            { x: curr.x, y: curr.y - 1 }
+            { x: curr.x - 1, y: curr.y }, // Neighbor West
+            { x: curr.x, y: curr.y - 1 }  // Neighbor South
         ];
 
         for (const cand of candidates) {
             const key = `${cand.x},${cand.y}`;
             if (visited.has(key)) continue;
 
+            // Determine if 'cand' actually points to 'curr'
             let connects = false;
+            const cValX = Math.round(activeTransform(cand.x));
+            const cValY = Math.round(activeTransform(cand.y));
+            const candGoesNorth = cValY !== 0 && (cValX % cValY === 0);
+
             if (cand.x === curr.x - 1 && cand.y === curr.y) {
-                if (gcd(cand.x, cand.y) === 1) connects = true;
+                // cand is West. Connects to curr (East) if it does NOT go North.
+                if (!candGoesNorth) connects = true;
             } else if (cand.x === curr.x && cand.y === curr.y - 1) {
-                if (gcd(cand.x, cand.y) > 1) connects = true;
+                // cand is South. Connects to curr (North) if it DOES go North.
+                if (candGoesNorth) connects = true;
             }
 
             if (connects) {
@@ -389,11 +442,10 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
         }
     }
 
-    // Reconstruct path
-    const path: Point[] = [];
-    let trace: Point | undefined | null = foundOrigin ? { x: 0, y: 0 } : undefined;
-
     if (!foundOrigin) return [];
+
+    const path: Point[] = [];
+    let trace: Point | undefined | null = { x: 0, y: 0 };
 
     while (trace) {
         path.push(trace);
@@ -403,13 +455,13 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
             break;
         }
     }
-
-    return path; // Returns (0,0) -> ... -> Start
+    return path;
   };
 
-
-  // Interaction Handlers
   const handlePointerDown = (e: React.PointerEvent) => {
+    // Only drag with left click (button 0)
+    if (e.button !== 0) return;
+    
     containerRef.current?.setPointerCapture(e.pointerId);
     setIsDragging(true);
     lastPos.current = { x: e.clientX, y: e.clientY };
@@ -418,11 +470,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (!isDragging) return;
-    
     const dx = e.clientX - lastPos.current.x;
     const dy = e.clientY - lastPos.current.y;
     lastPos.current = { x: e.clientX, y: e.clientY };
-
     onViewportChange({
       ...viewport,
       x: viewport.x - dx / viewport.zoom,
@@ -431,34 +481,51 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+
     setIsDragging(false);
     containerRef.current?.releasePointerCapture(e.pointerId);
-
-    // Detect Click vs Drag
-    const dist = Math.hypot(
-        e.clientX - dragStartPos.current.x, 
-        e.clientY - dragStartPos.current.y
-    );
+    const dist = Math.hypot(e.clientX - dragStartPos.current.x, e.clientY - dragStartPos.current.y);
 
     if (dist < 5 && canvasRef.current) {
-        // Handle Click
         const rect = canvasRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        
-        // Convert to Graph Coords
         const centerX = viewport.x;
         const centerY = viewport.y;
         const halfWidth = rect.width / 2;
         const halfHeight = rect.height / 2;
-        
         const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
-        const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY)); // Inverted Y logic reverse
+        const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
 
-        // Trace Path!
         const path = findPathToOrigin({ x: gx, y: gy });
         setTracedPath(path);
     }
+  };
+
+  // Handle right-click to toggle forward trace
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const centerX = viewport.x;
+    const centerY = viewport.y;
+    const halfWidth = rect.width / 2;
+    const halfHeight = rect.height / 2;
+    const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
+    const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
+
+    // Toggle custom path
+    setCustomStarts(prev => {
+        const exists = prev.find(p => p.x === gx && p.y === gy);
+        if (exists) {
+            return prev.filter(p => p !== exists);
+        }
+        return [...prev, { x: gx, y: gy }];
+    });
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -473,10 +540,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
         const mouseY = e.clientY - rect.top;
         const width = rect.width;
         const height = rect.height;
-        
         const mouseGraphX = (mouseX - width/2) / viewport.zoom + viewport.x;
         const mouseGraphY = -(mouseY - height/2) / viewport.zoom + viewport.y; 
-        
         const newX = mouseGraphX - (mouseX - width/2) / newZoom;
         const newY = mouseGraphY + (mouseY - height/2) / newZoom;
 
@@ -496,6 +561,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ viewport, onViewportChang
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerUp}
+      onContextMenu={handleContextMenu}
       onWheel={handleWheel}
     >
       <canvas ref={canvasRef} className="block w-full h-full" />

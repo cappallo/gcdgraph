@@ -15,6 +15,8 @@ function App() {
   // Default to NONE as requested, so only special paths are colored by default
   const [colorMode, setColorMode] = useState<ColorMode>(ColorMode.NONE);
   const [theme, setTheme] = useState<Theme>('light');
+  const [transformFunc, setTransformFunc] = useState<string>("x");
+  const [hideComposites, setHideComposites] = useState(false);
 
   return (
     <div className={`relative w-full h-full overflow-hidden transition-colors duration-300 ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
@@ -23,6 +25,8 @@ function App() {
         onViewportChange={setViewport}
         colorMode={colorMode}
         theme={theme}
+        transformFunc={transformFunc}
+        hideComposites={hideComposites}
       />
       <Controls 
         viewport={viewport} 
@@ -31,6 +35,10 @@ function App() {
         setColorMode={setColorMode}
         theme={theme}
         setTheme={setTheme}
+        transformFunc={transformFunc}
+        setTransformFunc={setTransformFunc}
+        hideComposites={hideComposites}
+        setHideComposites={setHideComposites}
       />
       
       {/* Branding / Watermark */}

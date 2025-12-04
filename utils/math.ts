@@ -20,6 +20,12 @@ export const getSmallestPrimeFactor = (n: number): number => {
   return n;
 };
 
+export const isComposite = (n: number): boolean => {
+  if (n <= 3) return false;
+  if (n % 2 === 0) return true;
+  return getSmallestPrimeFactor(n) !== n;
+};
+
 // Format GCD string (e.g., prime factorization or simple value)
 // For visual simplicity in the graph, we mostly just return the number,
 // but we could expand to exponential notation like 2^2 * 3 if desired.
@@ -94,4 +100,37 @@ export const getPartitionColor = (n: number): string => {
   // Use Golden Angle to separate colors visually
   const hue = (n * 137.508) % 360;
   return `hsl(${hue}, 85%, 45%)`;
+};
+
+// Create a function from a string expression like "2x+1"
+export const createTransformFunction = (expression: string): ((x: number) => number) => {
+  if (!expression || !expression.trim()) return (x) => x;
+
+  try {
+    let jsExpr = expression.replace(/\^/g, '**');
+
+    // Implicit multiplication
+    // 1. Number or closing paren followed by (variable, function name, or opening paren)
+    //    e.g. 2x, 2sin, 2(, )x, )sin, )(
+    jsExpr = jsExpr.replace(/(\d|\))(?=[a-zA-Z(])/g, '$1*');
+
+    // 2. Variable 'x' or closing paren followed by number
+    //    e.g. x2, )2
+    jsExpr = jsExpr.replace(/(x|\))(?=\d)/g, '$1*');
+    
+    const body = `
+      const { abs, min, max, round, floor, ceil, pow, sqrt, sin, cos, tan, log, PI, E } = Math;
+      return (${jsExpr});
+    `;
+    
+    const fn = new Function('x', body);
+    
+    // Validate with a sample call
+    const test = fn(1);
+    if (typeof test !== 'number' || isNaN(test)) return (x) => x;
+
+    return fn as (x: number) => number;
+  } catch (error) {
+    return (x) => x;
+  }
 };
