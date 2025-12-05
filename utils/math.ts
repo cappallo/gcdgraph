@@ -128,49 +128,196 @@ export const getPartitionColor = (n: number): string => {
   return `hsl(${hue}, 85%, 45%)`;
 };
 
-// Create a function from a string expression like "2x+1"
+// Create a safe transform function from a string expression like "2x+1" without using eval/Function
 export const createTransformFunction = (expression: string): ((x: number) => number) => {
   if (!expression || !expression.trim()) return (x) => x;
 
-  try {
-    let jsExpr = expression.replace(/\^/g, '**');
+  // Tokenize the input into numbers, operators, variables, and parentheses
+  type Token =
+    | { type: 'num'; value: number }
+    | { type: 'var' }
+    | { type: 'op'; value: string }
+    | { type: 'func'; name: string }
+    | { type: 'lparen' }
+    | { type: 'rparen' };
 
-    // Implicit multiplication
-    // 1. Number or closing paren followed by (variable, function name, or opening paren)
-    //    e.g. 2x, 2sin, 2(, )x, )sin, )(
-    jsExpr = jsExpr.replace(/(\d|\))(?=[a-zA-Z(])/g, '$1*');
+  const funcs: Record<string, (v: number) => number> = {
+    sin: Math.sin,
+    cos: Math.cos,
+    tan: Math.tan,
+    log: Math.log,
+    sqrt: Math.sqrt,
+    abs: Math.abs,
+    floor: Math.floor,
+    ceil: Math.ceil,
+    round: Math.round,
+    exp: Math.exp
+  };
 
-    // 2. Variable 'x' or 'n' or closing paren followed by number
-    //    e.g. x2, n2, )2
-    jsExpr = jsExpr.replace(/(x|n|\))(?=\d)/g, '$1*');
-    
-    const body = `
-      const { abs, min, max, round, floor, ceil, pow, sqrt, sin, cos, tan, log, PI, E } = Math;
-      const n = x;
-      return (${jsExpr});
-    `;
-    
-    const fn = new Function('x', body);
-    
-    // Validate with sample calls
-    // We try a few inputs to see if it produces a valid number at least once
-    // This allows functions that might be undefined at specific points (e.g., log(x-1) at x=1)
-    const testInputs = [1, 2, 0.5, 10];
-    let isValid = false;
-    for (const t of testInputs) {
-        try {
-            const res = fn(t);
-            if (typeof res === 'number' && !isNaN(res)) {
-                isValid = true;
-                break;
+  const precedence: Record<string, number> = {
+    '+': 1,
+    '-': 1,
+    '*': 2,
+    '/': 2,
+    '^': 3,
+    neg: 4 // unary minus
+  };
+
+  const isRightAssoc = (op: string) => op === '^' || op === 'neg';
+
+  const tokenize = (src: string): Token[] | null => {
+    const tokens: Token[] = [];
+    let i = 0;
+
+    while (i < src.length) {
+      const ch = src[i];
+      if (ch === ' ' || ch === '\t' || ch === '\n') {
+        i++;
+        continue;
+      }
+      if (/[0-9.]/.test(ch)) {
+        let j = i + 1;
+        while (j < src.length && /[0-9.]/.test(src[j])) j++;
+        const num = parseFloat(src.slice(i, j));
+        if (isNaN(num)) return null;
+        tokens.push({ type: 'num', value: num });
+        i = j;
+        continue;
+      }
+      if (/[a-zA-Z]/.test(ch)) {
+        let j = i + 1;
+        while (j < src.length && /[a-zA-Z]/.test(src[j])) j++;
+        const name = src.slice(i, j).toLowerCase();
+        if (name === 'x' || name === 'n') {
+          tokens.push({ type: 'var' });
+        } else if (name === 'pi') {
+          tokens.push({ type: 'num', value: Math.PI });
+        } else if (name === 'e') {
+          tokens.push({ type: 'num', value: Math.E });
+        } else if (funcs[name]) {
+          tokens.push({ type: 'func', name });
+        } else {
+          return null; // unknown identifier
+        }
+        i = j;
+        continue;
+      }
+      if ('+-*/^'.includes(ch)) {
+        tokens.push({ type: 'op', value: ch });
+        i++;
+        continue;
+      }
+      if (ch === '(') {
+        tokens.push({ type: 'lparen' });
+        i++;
+        continue;
+      }
+      if (ch === ')') {
+        tokens.push({ type: 'rparen' });
+        i++;
+        continue;
+      }
+      return null;
+    }
+    return tokens;
+  };
+
+  const toRpn = (tokens: Token[]): Token[] | null => {
+    const output: Token[] = [];
+    const stack: Token[] = [];
+    let prev: Token | null = null;
+
+    for (const tok of tokens) {
+      if (tok.type === 'num' || tok.type === 'var') {
+        output.push(tok);
+      } else if (tok.type === 'func') {
+        stack.push(tok);
+      } else if (tok.type === 'op') {
+        const isUnary = tok.value === '-' && (prev === null || prev.type === 'op' || prev.type === 'lparen' || prev.type === 'func');
+        const opVal = isUnary ? 'neg' : tok.value;
+        while (stack.length > 0) {
+          const top = stack[stack.length - 1];
+          if (top.type === 'op') {
+            const precTop = precedence[top.value];
+            const precCur = precedence[opVal];
+            if (precTop > precCur || (precTop === precCur && !isRightAssoc(opVal))) {
+              output.push(stack.pop()!);
+              continue;
             }
-        } catch (e) {}
+          } else if (top.type === 'func') {
+            output.push(stack.pop()!);
+            continue;
+          }
+          break;
+        }
+        stack.push({ type: 'op', value: opVal });
+      } else if (tok.type === 'lparen') {
+        stack.push(tok);
+      } else if (tok.type === 'rparen') {
+        while (stack.length > 0 && stack[stack.length - 1].type !== 'lparen') {
+          output.push(stack.pop()!);
+        }
+        if (stack.length === 0) return null;
+        stack.pop(); // pop lparen
+        if (stack.length > 0 && stack[stack.length - 1].type === 'func') {
+          output.push(stack.pop()!);
+        }
+      }
+      prev = tok;
     }
 
-    if (!isValid) return (x) => x;
+    while (stack.length > 0) {
+      const t = stack.pop()!;
+      if (t.type === 'lparen' || t.type === 'rparen') return null;
+      output.push(t);
+    }
 
-    return fn as (x: number) => number;
-  } catch (error) {
-    return (x) => x;
-  }
+    return output;
+  };
+
+  const evalRpn = (rpn: Token[], x: number): number | null => {
+    const stack: number[] = [];
+    for (const tok of rpn) {
+      if (tok.type === 'num') stack.push(tok.value);
+      else if (tok.type === 'var') stack.push(x);
+      else if (tok.type === 'op') {
+        if (tok.value === 'neg') {
+          if (stack.length < 1) return null;
+          const a = stack.pop()!;
+          stack.push(-a);
+          continue;
+        }
+        if (stack.length < 2) return null;
+        const b = stack.pop()!;
+        const a = stack.pop()!;
+        switch (tok.value) {
+          case '+': stack.push(a + b); break;
+          case '-': stack.push(a - b); break;
+          case '*': stack.push(a * b); break;
+          case '/': stack.push(b === 0 ? Infinity : a / b); break;
+          case '^': stack.push(Math.pow(a, b)); break;
+          default: return null;
+        }
+      } else if (tok.type === 'func') {
+        if (stack.length < 1) return null;
+        const a = stack.pop()!;
+        const fn = funcs[tok.name];
+        if (!fn) return null;
+        stack.push(fn(a));
+      }
+    }
+    if (stack.length !== 1 || Number.isNaN(stack[0])) return null;
+    return stack[0];
+  };
+
+  const tokens = tokenize(expression.replace(/\s+/g, ''));
+  if (!tokens) return (x) => x;
+  const rpn = toRpn(tokens);
+  if (!rpn) return (x) => x;
+
+  // Return an evaluator that works without eval/Function
+  return (x: number) => {
+    const val = evalRpn(rpn, x);
+    return val === null ? x : val;
+  };
 };

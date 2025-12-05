@@ -13,7 +13,7 @@ function App() {
   });
 
   const [theme, setTheme] = useState<Theme>('light');
-  const [transformFunc, setTransformFunc] = useState<string>("x");
+  const [transformFunc, setTransformFunc] = useState<string>("n");
   const [simpleView, setSimpleView] = useState(false);
   const [showFactored, setShowFactored] = useState(true);
   const [rowShift, setRowShift] = useState<number>(0);

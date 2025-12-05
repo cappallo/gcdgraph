@@ -124,7 +124,11 @@ const Controls: React.FC<ControlsProps> = ({
                     <input 
                         type="text" 
                         value={funcInput}
-                        onChange={(e) => setFuncInput(e.target.value)}
+                       onChange={(e) => {
+                         const val = e.target.value;
+                         setFuncInput(val);
+                         setTransformFunc(val);
+                       }}
                         onBlur={commitFunc}
                         onKeyDown={handleKeyDown}
                         className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
