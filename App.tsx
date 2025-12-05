@@ -1,8 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import InfiniteGraph from './components/InfiniteGraph';
 import Controls from './components/Controls';
-import { Viewport, ColorMode, Theme } from './types';
+import { Viewport, Theme, Point } from './types';
 
 function App() {
   // Initial view centered slightly positive to show interesting initial structure
@@ -12,33 +12,39 @@ function App() {
     zoom: 45 
   });
 
-  // Default to NONE as requested, so only special paths are colored by default
-  const [colorMode, setColorMode] = useState<ColorMode>(ColorMode.NONE);
   const [theme, setTheme] = useState<Theme>('light');
   const [transformFunc, setTransformFunc] = useState<string>("x");
-  const [hideComposites, setHideComposites] = useState(false);
+  const [simpleView, setSimpleView] = useState(false);
+  const [showFactored, setShowFactored] = useState(true);
+  const [rowShift, setRowShift] = useState<number>(0);
+  const [cursorPos, setCursorPos] = useState<Point>({ x: 0, y: 0 });
 
   return (
     <div className={`relative w-full h-full overflow-hidden transition-colors duration-300 ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
       <InfiniteGraph 
         viewport={viewport} 
         onViewportChange={setViewport}
-        colorMode={colorMode}
         theme={theme}
         transformFunc={transformFunc}
-        hideComposites={hideComposites}
+        simpleView={simpleView}
+        showFactored={showFactored}
+        rowShift={rowShift}
+        onCursorMove={setCursorPos}
       />
       <Controls 
         viewport={viewport} 
         setViewport={setViewport}
-        colorMode={colorMode}
-        setColorMode={setColorMode}
         theme={theme}
         setTheme={setTheme}
         transformFunc={transformFunc}
         setTransformFunc={setTransformFunc}
-        hideComposites={hideComposites}
-        setHideComposites={setHideComposites}
+        simpleView={simpleView}
+        setSimpleView={setSimpleView}
+        showFactored={showFactored}
+        setShowFactored={setShowFactored}
+        rowShift={rowShift}
+        setRowShift={setRowShift}
+        cursorPos={cursorPos}
       />
       
       {/* Branding / Watermark */}

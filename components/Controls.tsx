@@ -1,32 +1,38 @@
 
 import React, { useState, useEffect } from 'react';
 import { Plus, Minus, RotateCcw, Move, Moon, Sun } from 'lucide-react';
-import { Viewport, ColorMode, Theme } from '../types';
+import { Viewport, Theme, Point } from '../types';
 
 interface ControlsProps {
   viewport: Viewport;
   setViewport: (v: Viewport) => void;
-  colorMode: ColorMode;
-  setColorMode: (m: ColorMode) => void;
   theme: Theme;
   setTheme: (t: Theme) => void;
   transformFunc: string;
   setTransformFunc: (s: string) => void;
-  hideComposites: boolean;
-  setHideComposites: (b: boolean) => void;
+  simpleView: boolean;
+  setSimpleView: (b: boolean) => void;
+  showFactored: boolean;
+  setShowFactored: (b: boolean) => void;
+  rowShift: number;
+  setRowShift: (n: number) => void;
+  cursorPos: Point;
 }
 
 const Controls: React.FC<ControlsProps> = ({ 
   viewport, 
   setViewport, 
-  colorMode, 
-  setColorMode,
   theme,
   setTheme,
   transformFunc,
   setTransformFunc,
-  hideComposites,
-  setHideComposites
+  simpleView,
+  setSimpleView,
+  showFactored,
+  setShowFactored,
+  rowShift,
+  setRowShift,
+  cursorPos
 }) => {
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
@@ -86,8 +92,8 @@ const Controls: React.FC<ControlsProps> = ({
           Visualizing the vector field where node <code>(x,y)</code> connects to:
         </p>
         <ul className={`text-xs mt-1 ml-4 list-disc space-y-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-            <li><code>(x+1, y)</code> if y does not divide x (East)</li>
-            <li><code>(x, y+1)</code> if y divides x (North)</li>
+            <li><code>(x+1, y)</code> if gcd(f(x),f(y)) = 1 (East)</li>
+            <li><code>(x, y+1)</code> if gcd(f(x),f(y)) ≠ 1 (North)</li>
         </ul>
         
         {/* Transform Input */}
@@ -106,37 +112,50 @@ const Controls: React.FC<ControlsProps> = ({
                     placeholder="e.g. 2x-1"
                 />
             </div>
-            <p className="text-[9px] opacity-50 mt-1">Maps (a,b) &rarr; (f(a),f(b))</p>
+        </div>
+
+        {/* Row Shift Slider */}
+        <div className="mt-4">
+             <label className={`flex justify-between text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                <span>Row Shift (k): {rowShift}</span>
+            </label>
+            <input 
+                type="range" 
+                min="0" 
+                max="50" 
+                step="1"
+                value={rowShift}
+                onChange={(e) => setRowShift(parseInt(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+            />
+             <p className="text-[9px] opacity-50 mt-1">Shifts x by k for rows [-k, k]</p>
         </div>
 
         <div className="mt-4 space-y-2">
             <label className={`flex items-center justify-between text-sm font-medium cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                <span>Color by Prime</span>
+                <span>Show Factors</span>
                 <input 
                     type="checkbox" 
                     className="w-4 h-4 accent-indigo-600 rounded"
-                    checked={colorMode === ColorMode.PRIME_FACTOR}
-                    onChange={(e) => setColorMode(e.target.checked ? ColorMode.PRIME_FACTOR : ColorMode.NONE)}
+                    checked={showFactored}
+                    onChange={(e) => setShowFactored(e.target.checked)}
                 />
             </label>
             
             <label className={`flex items-center justify-between text-sm font-medium cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                <span>Hide Composites</span>
+                <span>Simple view</span>
                 <input 
                     type="checkbox" 
                     className="w-4 h-4 accent-indigo-600 rounded"
-                    checked={hideComposites}
-                    onChange={(e) => setHideComposites(e.target.checked)}
+                    checked={simpleView}
+                    onChange={(e) => setSimpleView(e.target.checked)}
                 />
             </label>
-            <p className={`text-[10px] mt-1 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-                Highlights partitions created by prime factors.
-            </p>
         </div>
 
         <div className="mt-4 pt-3 border-t border-gray-500/20 flex justify-between text-[10px] opacity-60 font-mono">
-            <span>X: {viewport.x.toFixed(1)}</span>
-            <span>Y: {viewport.y.toFixed(1)}</span>
+            <span>X: {cursorPos.x}</span>
+            <span>Y: {cursorPos.y}</span>
             <span>Z: {viewport.zoom.toFixed(1)}</span>
         </div>
       </div>

@@ -1,23 +1,28 @@
+
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, getFactorColor, formatValue, getPartitionColor, createTransformFunction, isComposite } from '../utils/math';
-import { Viewport, ColorMode, Point, Theme } from '../types';
+import { gcd, formatValue, getPartitionColor, createTransformFunction, isComposite } from '../utils/math';
+import { Viewport, Point, Theme } from '../types';
 
 interface InfiniteGraphProps {
   viewport: Viewport;
   onViewportChange: (v: Viewport) => void;
-  colorMode: ColorMode;
   theme: Theme;
   transformFunc: string;
-  hideComposites: boolean;
+  simpleView: boolean;
+  showFactored: boolean;
+  rowShift: number;
+  onCursorMove: (p: Point) => void;
 }
 
 const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ 
   viewport, 
   onViewportChange, 
-  colorMode, 
   theme, 
   transformFunc,
-  hideComposites
+  simpleView,
+  showFactored,
+  rowShift,
+  onCursorMove
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,7 +44,29 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
   useEffect(() => {
     setTracedPath(null);
-  }, [viewport, transformFunc]);
+  }, [viewport, transformFunc, rowShift]);
+
+  // Helper to calculate effective X based on row shift
+  const getEffectiveX = useCallback((gx: number, gy: number) => {
+    if (Math.abs(gy) <= rowShift) {
+        if (gy > 0) return gx - rowShift;
+        if (gy < 0) return gx + rowShift;
+    }
+    return gx;
+  }, [rowShift]);
+
+  // Logic helper: Determine direction based on Coprime rule + Row Shift
+  const checkGoesNorth = useCallback((gx: number, gy: number) => {
+    const effectiveX = getEffectiveX(gx, gy);
+    
+    // Apply Transform
+    const vX = Math.round(activeTransform(effectiveX));
+    const vY = Math.round(activeTransform(gy));
+    
+    // Rule: Coprime (gcd=1) -> East (return false)
+    //       Not Coprime (gcd!=1) -> North (return true)
+    return gcd(vX, vY) !== 1;
+  }, [activeTransform, getEffectiveX]);
 
   // Helper to trace a path forward from a given point
   const traceForward = useCallback((startX: number, startY: number, maxSteps: number = 5000) => {
@@ -50,26 +77,22 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     for (let step = 0; step < maxSteps; step++) {
       points.push({ x: currX, y: currY });
       
-      const valX = Math.round(activeTransform(currX));
-      const valY = Math.round(activeTransform(currY));
-
-      // Graph logic: y | x -> North, else -> East
-      if (valY !== 0 && valX % valY === 0) {
+      if (checkGoesNorth(currX, currY)) {
         currY += 1;
       } else {
         currX += 1;
       }
       
-      if (currX > 20000 || currY > 20000) break;
+      if (currX > 5000 || currY > 5000) break;
     }
     return points;
-  }, [activeTransform]);
+  }, [checkGoesNorth]);
 
   // Pre-calculate "Rightmost" Partition Paths
   const partitionPaths = useMemo(() => {
     const paths: { color: string, points: Point[] }[] = [];
     
-    for (let n = 1; n <= 20; n++) {
+    for (let n = 1; n <= 0; n++) {
       paths.push({
         color: getPartitionColor(n),
         points: traceForward(Math.pow(n, 3), Math.pow(n, 2))
@@ -101,11 +124,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const dpr = window.devicePixelRatio || 1;
     
     // Explicitly set the transform to match DPR.
-    // This ensures that CSS pixels map correctly to physical pixels.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Use logical CSS dimensions for calculation
-    // This fixes the offset issue where the graph was drawn at physical coordinates
     const width = canvas.width / dpr;
     const height = canvas.height / dpr;
 
@@ -133,7 +153,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const maxY = Math.ceil(centerY + halfHeight / zoom);
 
     const showText = zoom > 30;
-    const showNodes = zoom > 2;
+    const showNodes = zoom > 12;
     
     const toScreen = (gx: number, gy: number) => ({
       x: (gx - centerX) * zoom + halfWidth,
@@ -141,39 +161,60 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     });
 
     // Thicker connections (Twice as wide)
-    ctx.lineWidth = Math.max(2, zoom / 7.5);
+    const gridLineWidth = Math.max(2, zoom / 7.5);
+    ctx.lineWidth = gridLineWidth;
     ctx.lineCap = 'round';
 
     const totalNodes = (maxX - minX) * (maxY - minY);
     const skipFactor = totalNodes > 50000 ? Math.ceil(Math.sqrt(totalNodes / 50000)) : 1;
 
-    // Reduced node size to increase gap (0.6 instead of 0.8)
+    // Reduced node size to increase gap
     const nodeSize = Math.max(2, zoom * 0.6); 
 
     for (let gx = minX; gx <= maxX; gx += skipFactor) {
       for (let gy = minY; gy <= maxY; gy += skipFactor) {
         const { x: screenX, y: screenY } = toScreen(gx, gy);
         
-        // Calculate transformed value for logic
-        const valX = activeTransform(gx);
+        // Calculate display value
+        const effectiveX = getEffectiveX(gx, gy);
+        const valX = activeTransform(effectiveX);
         const valY = activeTransform(gy);
         const vX = Math.round(valX);
         const vY = Math.round(valY);
         
-        // Logic: y | x -> North, else -> East
-        const goesNorth = vY !== 0 && (vX % vY === 0);
+        const goesNorth = checkGoesNorth(gx, gy);
         
-        // Use GCD for coloring/text purposes
         const displayVal = gcd(vX, vY);
         const isComp = isComposite(displayVal);
+        const isPrime = !isComp && displayVal > 1;
         
-        // Hide 1s as well if hiding composites
-        const shouldHide = hideComposites && (isComp || displayVal === 1);
+        // Visibility Logic
+        // 1. Hide 1s always (unless origin)
+        let hideNode = (displayVal === 1);
+
+        // 2. Simple View Logic
+        if (simpleView && !hideNode) {
+            if (isComp) {
+                hideNode = true;
+            } else if (isPrime) {
+                // Hide primes unless |p| == |x| or |p| == |y|
+                // Use grid coordinates for visual consistency
+                const absGx = Math.abs(gx);
+                const absGy = Math.abs(gy);
+                if (displayVal !== absGx && displayVal !== absGy) {
+                    hideNode = true;
+                }
+            }
+        }
+        
+        // Always show origin
+        if (gx === 0 && gy === 0) hideNode = false;
         
         if (showNodes) {
             // Connections
             ctx.strokeStyle = colors.grid;
-            // Line width set globally above
+            ctx.lineWidth = gridLineWidth; 
+            
             ctx.beginPath();
             ctx.moveTo(screenX, screenY);
             
@@ -187,13 +228,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             ctx.stroke();
 
             // Node Body
-            if (!shouldHide || (gx === 0 && gy === 0)) {
-                let fillColor;
-                if (colorMode === ColorMode.PRIME_FACTOR) {
-                    fillColor = getFactorColor(displayVal);
-                } else {
-                    fillColor = displayVal === 1 ? colors.nodeCoprime : colors.nodeFactor;
-                }
+            if (!hideNode) {
+                let fillColor = displayVal === 1 ? colors.nodeCoprime : colors.nodeFactor;
                 
                 ctx.fillStyle = fillColor;
                 const halfSize = nodeSize / 2;
@@ -209,12 +245,11 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         }
 
         // Text
-        if (showText && skipFactor === 1 && (!shouldHide || (gx === 0 && gy === 0))) {
+        if (showText && skipFactor === 1 && !hideNode) {
              if (displayVal > 1) {
-                const label = formatValue(displayVal);
+                const label = showFactored ? formatValue(displayVal) : displayVal.toString();
                 if (label) {
                     ctx.fillStyle = colors.text;
-                    // Shrink font size by ~1/3 (0.4 multiplier instead of 0.6)
                     const fontSize = Math.min(nodeSize * 0.4, 16);
                     ctx.font = `bold ${fontSize}px sans-serif`;
                     ctx.textAlign = 'center';
@@ -238,7 +273,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     // Draw Overlay Paths
     overlayPaths.forEach(path => {
         ctx.strokeStyle = path.color;
-        // Thicker overlay paths to match grid
         ctx.lineWidth = Math.max(3, zoom / 5); 
         ctx.beginPath();
         
@@ -263,13 +297,25 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             for (const p of path.points) {
                 if (p.x < minX - 1 || p.x > maxX + 1 || p.y < minY - 1 || p.y > maxY + 1) continue;
                 
-                const valX = activeTransform(p.x);
+                const effectiveX = getEffectiveX(p.x, p.y);
+                const valX = activeTransform(effectiveX);
                 const valY = activeTransform(p.y);
                 const val = gcd(Math.round(valX), Math.round(valY));
-                const isComp = isComposite(val);
+                
+                // Visibility Logic for Paths
+                let hideNode = (val === 1);
+                
+                if (simpleView && !hideNode) {
+                    if (isComposite(val)) {
+                        hideNode = true;
+                    } else if (val > 1) { // isPrime
+                        if (val !== Math.abs(p.x) && val !== Math.abs(p.y)) {
+                            hideNode = true;
+                        }
+                    }
+                }
 
-                // Apply hide logic to overlay paths too
-                if (hideComposites && (isComp || val === 1)) continue;
+                if (hideNode) continue;
                 
                 const s = toScreen(p.x, p.y);
                 const halfSize = nodeSize / 2;
@@ -284,10 +330,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                 }
 
                 if (showText && skipFactor === 1) {
-                    const label = formatValue(val);
+                    const label = (val > 1) ? (showFactored ? formatValue(val) : val.toString()) : "";
                     if (label) {
                         ctx.fillStyle = '#ffffff'; 
-                        // Smaller font size here too
                         const fontSize = Math.min(nodeSize * 0.4, 16);
                         ctx.font = `bold ${fontSize}px sans-serif`;
                         ctx.textAlign = 'center';
@@ -332,10 +377,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                  ctx.strokeRect(s.x - halfSize, s.y - halfSize, nodeSize, nodeSize);
 
                  if (showText && skipFactor === 1) {
-                    const valX = activeTransform(p.x);
+                    const effectiveX = getEffectiveX(p.x, p.y);
+                    const valX = activeTransform(effectiveX);
                     const valY = activeTransform(p.y);
                     const val = gcd(Math.round(valX), Math.round(valY));
-                    const label = formatValue(val);
+                    const label = (val > 1) ? (showFactored ? formatValue(val) : val.toString()) : "";
+                    
                     if (label || (p.x===0 && p.y===0)) {
                         ctx.fillStyle = '#000000';
                         const fontSize = Math.min(nodeSize * 0.4, 16);
@@ -353,7 +400,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         }
     }
 
-  }, [viewport, colorMode, partitionPaths, customPaths, tracedPath, theme, activeTransform, hideComposites]);
+  }, [viewport, partitionPaths, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, rowShift, showFactored, getEffectiveX]);
 
   useEffect(() => {
     const loop = () => {
@@ -372,15 +419,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const dpr = window.devicePixelRatio || 1;
         const rect = containerRef.current.getBoundingClientRect();
         
-        // Set physical pixel dimensions
         canvasRef.current.width = rect.width * dpr;
         canvasRef.current.height = rect.height * dpr;
         
-        // Set CSS layout dimensions
         canvasRef.current.style.width = `${rect.width}px`;
         canvasRef.current.style.height = `${rect.height}px`;
         
-        // Removed explicit ctx.scale() here because render() manages the transform
         render();
       }
     };
@@ -422,9 +466,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
             // Determine if 'cand' actually points to 'curr'
             let connects = false;
-            const cValX = Math.round(activeTransform(cand.x));
-            const cValY = Math.round(activeTransform(cand.y));
-            const candGoesNorth = cValY !== 0 && (cValX % cValY === 0);
+            const candGoesNorth = checkGoesNorth(cand.x, cand.y);
 
             if (cand.x === curr.x - 1 && cand.y === curr.y) {
                 // cand is West. Connects to curr (East) if it does NOT go North.
@@ -459,7 +501,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Only drag with left click (button 0)
     if (e.button !== 0) return;
     
     containerRef.current?.setPointerCapture(e.pointerId);
@@ -469,6 +510,20 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
+    if (canvasRef.current) {
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const centerX = viewport.x;
+        const centerY = viewport.y;
+        const halfWidth = rect.width / 2;
+        const halfHeight = rect.height / 2;
+        const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
+        const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
+        
+        onCursorMove({ x: gx, y: gy });
+    }
+
     if (!isDragging) return;
     const dx = e.clientX - lastPos.current.x;
     const dy = e.clientY - lastPos.current.y;
@@ -503,7 +558,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     }
   };
 
-  // Handle right-click to toggle forward trace
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     if (!canvasRef.current) return;
@@ -518,7 +572,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
     const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
 
-    // Toggle custom path
     setCustomStarts(prev => {
         const exists = prev.find(p => p.x === gx && p.y === gy);
         if (exists) {

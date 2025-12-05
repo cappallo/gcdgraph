@@ -10,9 +10,4 @@ export interface Viewport {
   zoom: number; // Pixels per unit
 }
 
-export enum ColorMode {
-  PRIME_FACTOR = 'PRIME_FACTOR',
-  NONE = 'NONE',
-}
-
 export type Theme = 'light' | 'dark';
