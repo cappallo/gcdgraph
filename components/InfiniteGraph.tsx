@@ -272,9 +272,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
     // Draw Overlay Paths
     overlayPaths.forEach(path => {
-        ctx.strokeStyle = path.color;
-        ctx.lineWidth = Math.max(3, zoom / 5); 
         ctx.beginPath();
+        let segmentCount = 0;
         
         for (let i = 0; i < path.points.length - 1; i++) {
             const p1 = path.points[i];
@@ -290,8 +289,24 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             
             ctx.moveTo(s1.x, s1.y);
             ctx.lineTo(s2.x, s2.y);
+            segmentCount++;
         }
-        ctx.stroke();
+        
+        if (segmentCount > 0) {
+            // Draw Halo/Outline for visibility against grid
+            ctx.save();
+            ctx.strokeStyle = isDark ? 'rgba(17, 24, 39, 0.8)' : 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = Math.max(5, zoom / 3.5);
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            ctx.restore();
+
+            // Draw Main Path
+            ctx.strokeStyle = path.color;
+            ctx.lineWidth = Math.max(2.5, zoom / 6); 
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        }
 
         if (showNodes) {
             for (const p of path.points) {
@@ -346,9 +361,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
     // Draw Traced Backward Path (Traced from pointer up)
     if (tracedPath && tracedPath.length > 0) {
-        ctx.strokeStyle = colors.tracePath;
-        ctx.lineWidth = Math.max(4, zoom / 4);
-        ctx.lineJoin = 'round';
         ctx.beginPath();
 
         const start = tracedPath[0];
@@ -360,6 +372,27 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             const s = toScreen(p.x, p.y);
             ctx.lineTo(s.x, s.y);
         }
+
+        // Draw Glow/Halo for Traced Path
+        ctx.save();
+        // Outer glow
+        ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
+        ctx.lineWidth = Math.max(8, zoom / 1.5);
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        
+        // Inner contrast outline
+        ctx.strokeStyle = isDark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.8)';
+        ctx.lineWidth = Math.max(6, zoom / 2.5);
+        ctx.stroke();
+        ctx.restore();
+
+        // Main colored line
+        ctx.strokeStyle = colors.tracePath;
+        ctx.lineWidth = Math.max(3, zoom / 4);
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
         ctx.stroke();
 
         if (showNodes) {
