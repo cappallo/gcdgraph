@@ -32,6 +32,11 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   const dragStartPos = useRef({ x: 0, y: 0 });
   const animationFrameId = useRef<number>(0);
 
+  // Multitouch State
+  const evCache = useRef<Map<number, {id: number, x: number, y: number}>>(new Map());
+  const prevPinchDiff = useRef<number>(-1);
+  const isPinching = useRef<boolean>(false);
+
   // Trace Path State (Backward from click)
   const [tracedPath, setTracedPath] = useState<Point[] | null>(null);
 
@@ -537,16 +542,58 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return path;
   };
 
+  const performZoom = (scaleFactor: number, centerClientX: number, centerClientY: number) => {
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mouseX = centerClientX - rect.left;
+    const mouseY = centerClientY - rect.top;
+    
+    const newZoom = Math.min(Math.max(viewport.zoom * scaleFactor, 0.5), 200);
+
+    const width = rect.width;
+    const height = rect.height;
+    
+    // Zoom towards the center point
+    const mouseGraphX = (mouseX - width/2) / viewport.zoom + viewport.x;
+    const mouseGraphY = -(mouseY - height/2) / viewport.zoom + viewport.y; 
+    
+    const newX = mouseGraphX - (mouseX - width/2) / newZoom;
+    const newY = mouseGraphY + (mouseY - height/2) / newZoom;
+
+    onViewportChange({
+        x: newX,
+        y: newY,
+        zoom: newZoom
+    });
+  };
+
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
+    // Check if it's a mouse right click
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     
     containerRef.current?.setPointerCapture(e.pointerId);
-    setIsDragging(true);
-    lastPos.current = { x: e.clientX, y: e.clientY };
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    evCache.current.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY });
+
+    if (evCache.current.size === 1) {
+         // Single touch/click: start potential drag or tap
+        setIsDragging(true);
+        isPinching.current = false;
+        lastPos.current = { x: e.clientX, y: e.clientY };
+        dragStartPos.current = { x: e.clientX, y: e.clientY };
+    } else if (evCache.current.size === 2) {
+        // Multi-touch: start pinch
+        setIsDragging(false);
+        isPinching.current = true;
+        
+        const points = Array.from(evCache.current.values()) as {id: number, x: number, y: number}[];
+        const dx = points[0].x - points[1].x;
+        const dy = points[0].y - points[1].y;
+        prevPinchDiff.current = Math.hypot(dx, dy);
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
+    // 1. Update Cursor Position (graph coordinates)
     if (canvasRef.current) {
         const rect = canvasRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
@@ -561,43 +608,93 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         onCursorMove({ x: gx, y: gy });
     }
 
-    if (!isDragging) return;
-    const dx = e.clientX - lastPos.current.x;
-    const dy = e.clientY - lastPos.current.y;
-    lastPos.current = { x: e.clientX, y: e.clientY };
-    onViewportChange({
-      ...viewport,
-      x: viewport.x - dx / viewport.zoom,
-      y: viewport.y + dy / viewport.zoom,
-    });
+    // 2. Update Pointer Cache
+    if (evCache.current.has(e.pointerId)) {
+        evCache.current.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY });
+    }
+
+    // 3. Handle Interactions
+    if (evCache.current.size === 2) {
+        // Handle Pinch Zoom
+        const points = Array.from(evCache.current.values()) as {id: number, x: number, y: number}[];
+        const dx = points[0].x - points[1].x;
+        const dy = points[0].y - points[1].y;
+        const curDiff = Math.hypot(dx, dy);
+
+        if (prevPinchDiff.current > 0) {
+            const zoomFactor = curDiff / prevPinchDiff.current;
+            const cx = (points[0].x + points[1].x) / 2;
+            const cy = (points[0].y + points[1].y) / 2;
+            
+            performZoom(zoomFactor, cx, cy);
+            
+            prevPinchDiff.current = curDiff;
+        }
+    } else if (evCache.current.size === 1 && isDragging) {
+        // Handle Pan
+        const dx = e.clientX - lastPos.current.x;
+        const dy = e.clientY - lastPos.current.y;
+        lastPos.current = { x: e.clientX, y: e.clientY };
+        onViewportChange({
+          ...viewport,
+          x: viewport.x - dx / viewport.zoom,
+          y: viewport.y + dy / viewport.zoom,
+        });
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
+    // Detect Tap Logic
+    // We only trigger 'tap' if:
+    // 1. There is only 1 active pointer (the one being lifted)
+    // 2. We were not pinching recently (isPinching flag)
+    // 3. The pointer type supports it (if mouse, check left button)
 
-    setIsDragging(false);
+    const isLastFinger = evCache.current.size === 1 && evCache.current.has(e.pointerId);
+    
+    if (isLastFinger && !isPinching.current && (e.pointerType !== 'mouse' || e.button === 0)) {
+         const dist = Math.hypot(e.clientX - dragStartPos.current.x, e.clientY - dragStartPos.current.y);
+         // Increased threshold for touch slop
+         if (dist < 10 && canvasRef.current) {
+             // Toggle Custom Path
+             const rect = canvasRef.current.getBoundingClientRect();
+             const x = e.clientX - rect.left;
+             const y = e.clientY - rect.top;
+             const centerX = viewport.x;
+             const centerY = viewport.y;
+             const halfWidth = rect.width / 2;
+             const halfHeight = rect.height / 2;
+             const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
+             const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
+
+             setCustomStarts(prev => {
+                const exists = prev.find(p => p.x === gx && p.y === gy);
+                if (exists) {
+                    return prev.filter(p => p !== exists);
+                }
+                return [...prev, { x: gx, y: gy }];
+             });
+         }
+    }
+
+    // Cleanup
+    evCache.current.delete(e.pointerId);
     containerRef.current?.releasePointerCapture(e.pointerId);
-    const dist = Math.hypot(e.clientX - dragStartPos.current.x, e.clientY - dragStartPos.current.y);
+    
+    if (evCache.current.size < 2) {
+        prevPinchDiff.current = -1;
+    }
+    if (evCache.current.size === 0) {
+        setIsDragging(false);
+    }
+  };
 
-    if (dist < 5 && canvasRef.current) {
-        // Toggle Custom Path (Forward)
-        const rect = canvasRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const centerX = viewport.x;
-        const centerY = viewport.y;
-        const halfWidth = rect.width / 2;
-        const halfHeight = rect.height / 2;
-        const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
-        const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
-
-        setCustomStarts(prev => {
-            const exists = prev.find(p => p.x === gx && p.y === gy);
-            if (exists) {
-                return prev.filter(p => p !== exists);
-            }
-            return [...prev, { x: gx, y: gy }];
-        });
+  const handlePointerLeave = (e: React.PointerEvent) => {
+    // On leave, we just clean up. We DO NOT trigger taps.
+    evCache.current.delete(e.pointerId);
+    containerRef.current?.releasePointerCapture(e.pointerId);
+    if (evCache.current.size === 0) {
+        setIsDragging(false);
     }
   };
 
@@ -624,25 +721,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     e.preventDefault();
     const zoomFactor = 1.1;
     const direction = e.deltaY > 0 ? 1 / zoomFactor : zoomFactor;
-    const newZoom = Math.min(Math.max(viewport.zoom * direction, 0.5), 200);
-    
-    if (canvasRef.current) {
-        const rect = canvasRef.current.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        const width = rect.width;
-        const height = rect.height;
-        const mouseGraphX = (mouseX - width/2) / viewport.zoom + viewport.x;
-        const mouseGraphY = -(mouseY - height/2) / viewport.zoom + viewport.y; 
-        const newX = mouseGraphX - (mouseX - width/2) / newZoom;
-        const newY = mouseGraphY + (mouseY - height/2) / newZoom;
-
-        onViewportChange({
-            x: newX,
-            y: newY,
-            zoom: newZoom
-        });
-    }
+    performZoom(direction, e.clientX, e.clientY);
   };
 
   return (
@@ -652,7 +731,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerLeave={handlePointerUp}
+      onPointerLeave={handlePointerLeave}
+      onPointerCancel={handlePointerLeave}
       onContextMenu={handleContextMenu}
       onWheel={handleWheel}
     >
