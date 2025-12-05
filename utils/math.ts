@@ -1,4 +1,5 @@
 
+
 // Greatest Common Divisor
 export const gcd = (a: number, b: number): number => {
   a = Math.abs(a);
@@ -24,6 +25,31 @@ export const isComposite = (n: number): boolean => {
   if (n <= 3) return false;
   if (n % 2 === 0) return true;
   return getSmallestPrimeFactor(n) !== n;
+};
+
+export const getPrimeFactorCount = (n: number): number => {
+  n = Math.abs(n);
+  if (n <= 1) return 0;
+  let count = 0;
+  let temp = n;
+  
+  // Handle 2 separately
+  while (temp % 2 === 0) {
+    count++;
+    temp /= 2;
+  }
+  
+  // Odd factors
+  let d = 3;
+  while (d * d <= temp) {
+    while (temp % d === 0) {
+      count++;
+      temp /= d;
+    }
+    d += 2;
+  }
+  if (temp > 1) count++;
+  return count;
 };
 
 // Format GCD string (e.g., prime factorization or simple value)

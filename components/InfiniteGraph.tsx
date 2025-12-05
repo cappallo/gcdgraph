@@ -1,6 +1,5 @@
-
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, formatValue, getPartitionColor, createTransformFunction, isComposite } from '../utils/math';
+import { gcd, formatValue, getPartitionColor, createTransformFunction, isComposite, getPrimeFactorCount } from '../utils/math';
 import { Viewport, Point, Theme } from '../types';
 
 interface InfiniteGraphProps {
@@ -12,6 +11,7 @@ interface InfiniteGraphProps {
   showFactored: boolean;
   rowShift: number;
   onCursorMove: (p: Point) => void;
+  degree: number;
 }
 
 const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ 
@@ -22,7 +22,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   simpleView,
   showFactored,
   rowShift,
-  onCursorMove
+  onCursorMove,
+  degree
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -185,24 +186,23 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const goesNorth = checkGoesNorth(gx, gy);
         
         const displayVal = gcd(vX, vY);
-        const isComp = isComposite(displayVal);
-        const isPrime = !isComp && displayVal > 1;
         
         // Visibility Logic
         // 1. Hide 1s always (unless origin)
         let hideNode = (displayVal === 1);
 
-        // 2. Simple View Logic
+        // 2. Simple View Logic with Degree
         if (simpleView && !hideNode) {
-            if (isComp) {
+            const k = getPrimeFactorCount(displayVal);
+            if (k !== degree) {
                 hideNode = true;
-            } else if (isPrime) {
-                // Hide primes unless |p| == |x| or |p| == |y|
-                // Use grid coordinates for visual consistency
-                const absGx = Math.abs(gx);
-                const absGy = Math.abs(gy);
-                if (displayVal !== absGx && displayVal !== absGy) {
-                    hideNode = true;
+            } else {
+                // Check if val matches the transformed value of X or Y
+                // This implies divisibility: displayVal == |vX| means vX divides vY or vice versa in terms of GCD structure
+                const absVX = Math.abs(vX);
+                const absVY = Math.abs(vY);
+                if (displayVal !== absVX && displayVal !== absVY) {
+                     hideNode = true;
                 }
             }
         }
@@ -317,15 +317,19 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                 const valY = activeTransform(p.y);
                 const val = gcd(Math.round(valX), Math.round(valY));
                 
-                // Visibility Logic for Paths
+                // Visibility Logic for Paths (apply same rules)
                 let hideNode = (val === 1);
                 
                 if (simpleView && !hideNode) {
-                    if (isComposite(val)) {
+                    const k = getPrimeFactorCount(val);
+                    if (k !== degree) {
                         hideNode = true;
-                    } else if (val > 1) { // isPrime
-                        if (val !== Math.abs(p.x) && val !== Math.abs(p.y)) {
-                            hideNode = true;
+                    } else {
+                        // Unify logic: Check if gcd equals one of the components
+                        const absVX = Math.abs(Math.round(valX));
+                        const absVY = Math.abs(Math.round(valY));
+                        if (val !== absVX && val !== absVY) {
+                             hideNode = true;
                         }
                     }
                 }
@@ -433,7 +437,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         }
     }
 
-  }, [viewport, partitionPaths, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, rowShift, showFactored, getEffectiveX]);
+  }, [viewport, partitionPaths, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, rowShift, showFactored, getEffectiveX, degree]);
 
   useEffect(() => {
     const loop = () => {
@@ -576,6 +580,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const dist = Math.hypot(e.clientX - dragStartPos.current.x, e.clientY - dragStartPos.current.y);
 
     if (dist < 5 && canvasRef.current) {
+        // Toggle Custom Path (Forward)
         const rect = canvasRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
@@ -586,8 +591,13 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
         const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
 
-        const path = findPathToOrigin({ x: gx, y: gy });
-        setTracedPath(path);
+        setCustomStarts(prev => {
+            const exists = prev.find(p => p.x === gx && p.y === gy);
+            if (exists) {
+                return prev.filter(p => p !== exists);
+            }
+            return [...prev, { x: gx, y: gy }];
+        });
     }
   };
 
@@ -595,6 +605,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     e.preventDefault();
     if (!canvasRef.current) return;
 
+    // Trace Backward on Right Click
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -605,13 +616,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
     const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
 
-    setCustomStarts(prev => {
-        const exists = prev.find(p => p.x === gx && p.y === gy);
-        if (exists) {
-            return prev.filter(p => p !== exists);
-        }
-        return [...prev, { x: gx, y: gy }];
-    });
+    const path = findPathToOrigin({ x: gx, y: gy });
+    setTracedPath(path);
   };
 
   const handleWheel = (e: React.WheelEvent) => {

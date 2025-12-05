@@ -18,9 +18,10 @@ function App() {
   const [showFactored, setShowFactored] = useState(true);
   const [rowShift, setRowShift] = useState<number>(0);
   const [cursorPos, setCursorPos] = useState<Point>({ x: 0, y: 0 });
+  const [degree, setDegree] = useState<number>(1);
 
   return (
-    <div className={`relative w-full h-full overflow-hidden transition-colors duration-300 ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
+    <div className={`relative w-full h-full overflow-hidden transition-colors duration-300 select-none ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
       <InfiniteGraph 
         viewport={viewport} 
         onViewportChange={setViewport}
@@ -30,6 +31,7 @@ function App() {
         showFactored={showFactored}
         rowShift={rowShift}
         onCursorMove={setCursorPos}
+        degree={degree}
       />
       <Controls 
         viewport={viewport} 
@@ -45,6 +47,8 @@ function App() {
         rowShift={rowShift}
         setRowShift={setRowShift}
         cursorPos={cursorPos}
+        degree={degree}
+        setDegree={setDegree}
       />
       
       {/* Branding / Watermark */}
