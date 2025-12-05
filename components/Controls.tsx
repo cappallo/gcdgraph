@@ -128,7 +128,7 @@ const Controls: React.FC<ControlsProps> = ({
                         onBlur={commitFunc}
                         onKeyDown={handleKeyDown}
                         className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
-                        placeholder="e.g. 2x-1"
+                        placeholder="e.g. n^2 + 1"
                     />
                 </div>
             </div>

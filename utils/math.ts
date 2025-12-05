@@ -140,20 +140,34 @@ export const createTransformFunction = (expression: string): ((x: number) => num
     //    e.g. 2x, 2sin, 2(, )x, )sin, )(
     jsExpr = jsExpr.replace(/(\d|\))(?=[a-zA-Z(])/g, '$1*');
 
-    // 2. Variable 'x' or closing paren followed by number
-    //    e.g. x2, )2
-    jsExpr = jsExpr.replace(/(x|\))(?=\d)/g, '$1*');
+    // 2. Variable 'x' or 'n' or closing paren followed by number
+    //    e.g. x2, n2, )2
+    jsExpr = jsExpr.replace(/(x|n|\))(?=\d)/g, '$1*');
     
     const body = `
       const { abs, min, max, round, floor, ceil, pow, sqrt, sin, cos, tan, log, PI, E } = Math;
+      const n = x;
       return (${jsExpr});
     `;
     
     const fn = new Function('x', body);
     
-    // Validate with a sample call
-    const test = fn(1);
-    if (typeof test !== 'number' || isNaN(test)) return (x) => x;
+    // Validate with sample calls
+    // We try a few inputs to see if it produces a valid number at least once
+    // This allows functions that might be undefined at specific points (e.g., log(x-1) at x=1)
+    const testInputs = [1, 2, 0.5, 10];
+    let isValid = false;
+    for (const t of testInputs) {
+        try {
+            const res = fn(t);
+            if (typeof res === 'number' && !isNaN(res)) {
+                isValid = true;
+                break;
+            }
+        } catch (e) {}
+    }
+
+    if (!isValid) return (x) => x;
 
     return fn as (x: number) => number;
   } catch (error) {
