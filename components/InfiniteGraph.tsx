@@ -94,19 +94,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return points;
   }, [checkGoesNorth]);
 
-  // Pre-calculate "Rightmost" Partition Paths
-  const partitionPaths = useMemo(() => {
-    const paths: { color: string, points: Point[] }[] = [];
-    
-    for (let n = 1; n <= 0; n++) {
-      paths.push({
-        color: getPartitionColor(n),
-        points: traceForward(Math.pow(n, 3), Math.pow(n, 2))
-      });
-    }
-    return paths;
-  }, [traceForward]);
-
   // Calculate user-defined custom paths
   const customPaths = useMemo(() => {
     return customStarts.map(start => {
@@ -272,8 +259,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-    // Combine Partition Paths and Custom Paths
-    const overlayPaths = [...partitionPaths, ...customPaths];
+    // Combine Custom Paths
+    const overlayPaths = [...customPaths];
 
     // Draw Overlay Paths
     overlayPaths.forEach(path => {
@@ -442,7 +429,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         }
     }
 
-  }, [viewport, partitionPaths, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, rowShift, showFactored, getEffectiveX, degree]);
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, rowShift, showFactored, getEffectiveX, degree]);
 
   useEffect(() => {
     const loop = () => {
