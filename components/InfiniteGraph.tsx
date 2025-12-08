@@ -15,6 +15,60 @@ interface InfiniteGraphProps {
   resetPathsSignal: number;
 }
 
+// Calculate a readable text color (black/white) against a given background color.
+// Supports hex (#rgb/#rrggbb) and hsl() strings.
+const getContrastingTextColor = (bgColor: string) => {
+  const parseHex = (hex: string) => {
+    const clean = hex.replace('#', '');
+    if (clean.length === 3) {
+      const r = parseInt(clean[0] + clean[0], 16);
+      const g = parseInt(clean[1] + clean[1], 16);
+      const b = parseInt(clean[2] + clean[2], 16);
+      return [r, g, b];
+    }
+    if (clean.length === 6) {
+      const r = parseInt(clean.substring(0, 2), 16);
+      const g = parseInt(clean.substring(2, 4), 16);
+      const b = parseInt(clean.substring(4, 6), 16);
+      return [r, g, b];
+    }
+    return null;
+  };
+
+  const hslToRgb = (h: number, s: number, l: number) => {
+    const a = s * Math.min(l, 1 - l);
+    const f = (n: number) => {
+      const k = (n + h / 30) % 12;
+      const color = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+      return Math.round(255 * color);
+    };
+    return [f(0), f(8), f(4)];
+  };
+
+  const parseColor = (c: string) => {
+    if (c.startsWith('#')) {
+      return parseHex(c);
+    }
+    const hslMatch = c.match(/hsl\(([-\d.]+),\s*([\d.]+)%?,\s*([\d.]+)%?\)/i);
+    if (hslMatch) {
+      const h = parseFloat(hslMatch[1]);
+      const s = parseFloat(hslMatch[2]) / 100;
+      const l = parseFloat(hslMatch[3]) / 100;
+      return hslToRgb(h, s, l);
+    }
+    return null;
+  };
+
+  const rgb = parseColor(bgColor);
+  if (!rgb) return '#000000';
+
+  const [r, g, b] = rgb.map(v => v / 255);
+  const toLinear = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  const luminance = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+
+  return luminance > 0.55 ? '#111111' : '#ffffff';
+};
+
 const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ 
   viewport, 
   onViewportChange, 
@@ -246,10 +300,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
         // Text
         if (showText && skipFactor === 1 && !hideNode) {
-             if (displayVal > 1) {
+            const nodeBgColor = (gx === 0 && gy === 0)
+              ? colors.origin
+              : (displayVal === 1 ? colors.nodeCoprime : colors.nodeFactor);
+
+            if (displayVal > 1) {
                 const label = showFactored ? formatValue(displayVal) : displayVal.toString();
                 if (label) {
-                    ctx.fillStyle = colors.text;
+                    ctx.fillStyle = getContrastingTextColor(nodeBgColor);
                     const fontSize = Math.min(nodeSize * 0.4, 16);
                     ctx.font = `bold ${fontSize}px sans-serif`;
                     ctx.textAlign = 'center';
@@ -257,7 +315,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                     ctx.fillText(label, screenX, screenY);
                 }
             } else if (gx === 0 && gy === 0) {
-                 ctx.fillStyle = '#000';
+                 ctx.fillStyle = getContrastingTextColor(nodeBgColor);
                  ctx.font = `bold ${Math.min(nodeSize * 0.4, 16)}px sans-serif`;
                  ctx.textAlign = 'center';
                  ctx.textBaseline = 'middle';
@@ -351,7 +409,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                 if (showText && skipFactor === 1) {
                     const label = (val > 1) ? (showFactored ? formatValue(val) : val.toString()) : "";
                     if (label) {
-                        ctx.fillStyle = '#ffffff'; 
+                        ctx.fillStyle = getContrastingTextColor(path.color); 
                         const fontSize = Math.min(nodeSize * 0.4, 16);
                         ctx.font = `bold ${fontSize}px sans-serif`;
                         ctx.textAlign = 'center';
