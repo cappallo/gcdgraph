@@ -142,15 +142,29 @@ const Controls: React.FC<ControlsProps> = ({
                 <label className={`flex justify-between text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                     <span>Row Shift (k): {rowShift}</span>
                 </label>
-                <input 
-                    type="range" 
-                    min="0" 
-                    max="210" 
-                    step="1"
-                    value={rowShift}
-                    onChange={(e) => setRowShift(parseInt(e.target.value))}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                />
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setRowShift(Math.max(0, rowShift - 1))}
+                        className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}
+                    >
+                        <Minus className="w-3 h-3" />
+                    </button>
+                    <input 
+                        type="range" 
+                        min="0" 
+                        max="210" 
+                        step="1"
+                        value={rowShift}
+                        onChange={(e) => setRowShift(parseInt(e.target.value))}
+                        className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                    />
+                    <button
+                        onClick={() => setRowShift(Math.min(210, rowShift + 1))}
+                        className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}
+                    >
+                        <Plus className="w-3 h-3" />
+                    </button>
+                </div>
                 <p className="text-[9px] opacity-50 mt-1">Shifts x by k for rows [-k, k]</p>
             </div>
 
