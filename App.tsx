@@ -18,6 +18,7 @@ function App() {
   const [showFactored, setShowFactored] = useState(true);
   const [rowShift, setRowShift] = useState<number>(0);
   const [shiftLock, setShiftLock] = useState<boolean>(true);
+  const [randomizeShift, setRandomizeShift] = useState<boolean>(false);
   const [cursorPos, setCursorPos] = useState<Point>({ x: 0, y: 0 });
   const [degree, setDegree] = useState<number>(1);
   const [resetPathsSignal, setResetPathsSignal] = useState<number>(0);
@@ -37,6 +38,7 @@ function App() {
         showFactored={showFactored}
         rowShift={rowShift}
         shiftLock={shiftLock}
+        randomizeShift={randomizeShift}
         onCursorMove={setCursorPos}
         degree={degree}
         resetPathsSignal={resetPathsSignal}
@@ -56,6 +58,8 @@ function App() {
         setRowShift={setRowShift}
         shiftLock={shiftLock}
         setShiftLock={setShiftLock}
+        randomizeShift={randomizeShift}
+        setRandomizeShift={setRandomizeShift}
         cursorPos={cursorPos}
         degree={degree}
         setDegree={setDegree}

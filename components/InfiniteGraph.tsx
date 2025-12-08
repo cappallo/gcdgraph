@@ -11,6 +11,7 @@ interface InfiniteGraphProps {
   showFactored: boolean;
   rowShift: number;
   shiftLock: boolean;
+  randomizeShift: boolean;
   onCursorMove: (p: Point) => void;
   degree: number;
   resetPathsSignal: number;
@@ -79,6 +80,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   showFactored,
   rowShift,
   shiftLock,
+  randomizeShift,
   onCursorMove,
   degree,
   resetPathsSignal
@@ -89,7 +91,10 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   const lastPos = useRef({ x: 0, y: 0 });
   const dragStartPos = useRef({ x: 0, y: 0 });
   const animationFrameId = useRef<number>(0);
-  const prevRowShift = useRef<number>(rowShift);
+  const prevRowShiftConfig = useRef<{ k: number; randomize: boolean }>({
+    k: rowShift,
+    randomize: randomizeShift
+  });
 
   // Multitouch State
   const evCache = useRef<Map<number, {id: number, x: number, y: number}>>(new Map());
@@ -109,7 +114,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
   useEffect(() => {
     setTracedPath(null);
-  }, [viewport, transformFunc, rowShift]);
+  }, [viewport, transformFunc, rowShift, randomizeShift]);
 
   // External reset for all user-created paths
   useEffect(() => {
@@ -117,40 +122,52 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     setCustomStarts([]);
   }, [resetPathsSignal]);
 
+  // Magnitude of horizontal shift for a given row
+  const getRowShiftMagnitude = useCallback((gy: number, k: number, useRandom: boolean) => {
+    if (k <= 0 || Math.abs(gy) > k) return 0;
+    if (!useRandom) return k;
+
+    // Deterministic pseudo-random in [0, k-1] per row/k combo
+    const seed = gy * 374761393 + k * 668265263;
+    const noise = Math.abs(Math.sin(seed) * 10000);
+    const fraction = noise - Math.floor(noise);
+    return Math.floor(fraction * k);
+  }, []);
+
   // Helper to calculate effective X based on row shift
   const getEffectiveX = useCallback((gx: number, gy: number) => {
-    if (Math.abs(gy) <= rowShift) {
-        if (gy > 0) return gx - rowShift;
-        if (gy < 0) return gx + rowShift;
+    const offset = getRowShiftMagnitude(gy, rowShift, randomizeShift);
+    if (offset > 0) {
+        if (gy > 0) return gx - offset;
+        if (gy < 0) return gx + offset;
     }
     return gx;
-  }, [rowShift]);
+  }, [rowShift, randomizeShift, getRowShiftMagnitude]);
 
   // Offset helper used to keep custom start nodes aligned with row shifts
-  const getRowOffset = useCallback((gy: number, k: number) => {
-    if (Math.abs(gy) <= k) {
-      if (gy > 0) return k;
-      if (gy < 0) return -k;
-    }
+  const getRowOffset = useCallback((gy: number, k: number, useRandom: boolean) => {
+    const magnitude = getRowShiftMagnitude(gy, k, useRandom);
+    if (gy > 0) return magnitude;
+    if (gy < 0) return -magnitude;
     return 0;
-  }, []);
+  }, [getRowShiftMagnitude]);
 
   // Shift custom path starting nodes when unlocked so they follow row adjustments
   useEffect(() => {
-    if (shiftLock) {
-      prevRowShift.current = rowShift;
+    const previous = prevRowShiftConfig.current;
+    const sameConfig = previous.k === rowShift && previous.randomize === randomizeShift;
+
+    if (shiftLock || sameConfig) {
+      prevRowShiftConfig.current = { k: rowShift, randomize: randomizeShift };
       return;
     }
-
-    const previous = prevRowShift.current;
-    if (previous === rowShift) return;
 
     setCustomStarts((starts) => {
       if (starts.length === 0) return starts;
 
       let changed = false;
       const next = starts.map((p) => {
-        const delta = getRowOffset(p.y, rowShift) - getRowOffset(p.y, previous);
+        const delta = getRowOffset(p.y, rowShift, randomizeShift) - getRowOffset(p.y, previous.k, previous.randomize);
         if (delta === 0) return p;
         changed = true;
         return { ...p, x: p.x + delta };
@@ -159,8 +176,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       return changed ? next : starts;
     });
 
-    prevRowShift.current = rowShift;
-  }, [rowShift, shiftLock, getRowOffset]);
+    prevRowShiftConfig.current = { k: rowShift, randomize: randomizeShift };
+  }, [rowShift, shiftLock, randomizeShift, getRowOffset]);
 
   // Logic helper: Determine direction based on Coprime rule + Row Shift
   const checkGoesNorth = useCallback((gx: number, gy: number) => {

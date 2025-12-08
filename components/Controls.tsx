@@ -19,6 +19,8 @@ interface ControlsProps {
   setRowShift: (n: number) => void;
   shiftLock: boolean;
   setShiftLock: (b: boolean) => void;
+  randomizeShift: boolean;
+  setRandomizeShift: (b: boolean) => void;
   cursorPos: Point;
   degree: number;
   setDegree: (n: number) => void;
@@ -40,6 +42,8 @@ const Controls: React.FC<ControlsProps> = ({
   setRowShift,
   shiftLock,
   setShiftLock,
+  randomizeShift,
+  setRandomizeShift,
   cursorPos,
   degree,
   setDegree,
@@ -175,6 +179,16 @@ const Controls: React.FC<ControlsProps> = ({
             </div>
 
             <div className="mt-4 space-y-2">
+                <label className={`flex items-center justify-between text-sm font-medium cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <span>Randomize shift</span>
+                    <input
+                        type="checkbox"
+                        className="w-4 h-4 accent-indigo-600 rounded"
+                        checked={randomizeShift}
+                        onChange={(e) => setRandomizeShift(e.target.checked)}
+                    />
+                </label>
+
                 <label className={`flex items-center justify-between text-sm font-medium cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
                     <span>Shift lock</span>
                     <input
