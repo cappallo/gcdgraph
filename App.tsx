@@ -17,6 +17,7 @@ function App() {
   const [simpleView, setSimpleView] = useState(false);
   const [showFactored, setShowFactored] = useState(true);
   const [rowShift, setRowShift] = useState<number>(0);
+  const [shiftLock, setShiftLock] = useState<boolean>(true);
   const [cursorPos, setCursorPos] = useState<Point>({ x: 0, y: 0 });
   const [degree, setDegree] = useState<number>(1);
   const [resetPathsSignal, setResetPathsSignal] = useState<number>(0);
@@ -35,6 +36,7 @@ function App() {
         simpleView={simpleView}
         showFactored={showFactored}
         rowShift={rowShift}
+        shiftLock={shiftLock}
         onCursorMove={setCursorPos}
         degree={degree}
         resetPathsSignal={resetPathsSignal}
@@ -52,6 +54,8 @@ function App() {
         setShowFactored={setShowFactored}
         rowShift={rowShift}
         setRowShift={setRowShift}
+        shiftLock={shiftLock}
+        setShiftLock={setShiftLock}
         cursorPos={cursorPos}
         degree={degree}
         setDegree={setDegree}

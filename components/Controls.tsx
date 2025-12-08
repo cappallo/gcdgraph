@@ -17,6 +17,8 @@ interface ControlsProps {
   setShowFactored: (b: boolean) => void;
   rowShift: number;
   setRowShift: (n: number) => void;
+  shiftLock: boolean;
+  setShiftLock: (b: boolean) => void;
   cursorPos: Point;
   degree: number;
   setDegree: (n: number) => void;
@@ -36,6 +38,8 @@ const Controls: React.FC<ControlsProps> = ({
   setShowFactored,
   rowShift,
   setRowShift,
+  shiftLock,
+  setShiftLock,
   cursorPos,
   degree,
   setDegree,
@@ -171,6 +175,16 @@ const Controls: React.FC<ControlsProps> = ({
             </div>
 
             <div className="mt-4 space-y-2">
+                <label className={`flex items-center justify-between text-sm font-medium cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <span>Shift lock</span>
+                    <input
+                        type="checkbox"
+                        className="w-4 h-4 accent-indigo-600 rounded"
+                        checked={shiftLock}
+                        onChange={(e) => setShiftLock(e.target.checked)}
+                    />
+                </label>
+
                 <label className={`flex items-center justify-between text-sm font-medium cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
                     <span>Show Factors</span>
                     <input 

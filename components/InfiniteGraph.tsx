@@ -10,6 +10,7 @@ interface InfiniteGraphProps {
   simpleView: boolean;
   showFactored: boolean;
   rowShift: number;
+  shiftLock: boolean;
   onCursorMove: (p: Point) => void;
   degree: number;
   resetPathsSignal: number;
@@ -77,6 +78,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   simpleView,
   showFactored,
   rowShift,
+  shiftLock,
   onCursorMove,
   degree,
   resetPathsSignal
@@ -87,6 +89,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   const lastPos = useRef({ x: 0, y: 0 });
   const dragStartPos = useRef({ x: 0, y: 0 });
   const animationFrameId = useRef<number>(0);
+  const prevRowShift = useRef<number>(rowShift);
 
   // Multitouch State
   const evCache = useRef<Map<number, {id: number, x: number, y: number}>>(new Map());
@@ -122,6 +125,42 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     }
     return gx;
   }, [rowShift]);
+
+  // Offset helper used to keep custom start nodes aligned with row shifts
+  const getRowOffset = useCallback((gy: number, k: number) => {
+    if (Math.abs(gy) <= k) {
+      if (gy > 0) return k;
+      if (gy < 0) return -k;
+    }
+    return 0;
+  }, []);
+
+  // Shift custom path starting nodes when unlocked so they follow row adjustments
+  useEffect(() => {
+    if (shiftLock) {
+      prevRowShift.current = rowShift;
+      return;
+    }
+
+    const previous = prevRowShift.current;
+    if (previous === rowShift) return;
+
+    setCustomStarts((starts) => {
+      if (starts.length === 0) return starts;
+
+      let changed = false;
+      const next = starts.map((p) => {
+        const delta = getRowOffset(p.y, rowShift) - getRowOffset(p.y, previous);
+        if (delta === 0) return p;
+        changed = true;
+        return { ...p, x: p.x + delta };
+      });
+
+      return changed ? next : starts;
+    });
+
+    prevRowShift.current = rowShift;
+  }, [rowShift, shiftLock, getRowOffset]);
 
   // Logic helper: Determine direction based on Coprime rule + Row Shift
   const checkGoesNorth = useCallback((gx: number, gy: number) => {
