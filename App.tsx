@@ -19,6 +19,11 @@ function App() {
   const [rowShift, setRowShift] = useState<number>(0);
   const [cursorPos, setCursorPos] = useState<Point>({ x: 0, y: 0 });
   const [degree, setDegree] = useState<number>(1);
+  const [resetPathsSignal, setResetPathsSignal] = useState<number>(0);
+
+  const resetPaths = useCallback(() => {
+    setResetPathsSignal((s) => s + 1);
+  }, []);
 
   return (
     <div className={`relative w-full h-full overflow-hidden transition-colors duration-300 select-none ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
@@ -32,6 +37,7 @@ function App() {
         rowShift={rowShift}
         onCursorMove={setCursorPos}
         degree={degree}
+        resetPathsSignal={resetPathsSignal}
       />
       <Controls 
         viewport={viewport} 
@@ -49,6 +55,7 @@ function App() {
         cursorPos={cursorPos}
         degree={degree}
         setDegree={setDegree}
+        onResetPaths={resetPaths}
       />
       
       {/* Branding / Watermark */}

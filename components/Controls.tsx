@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Minus, RotateCcw, Move, Moon, Sun, SlidersHorizontal } from 'lucide-react';
+import { Plus, Minus, RotateCcw, Move, Moon, Sun, SlidersHorizontal, Eraser } from 'lucide-react';
 import { Viewport, Theme, Point } from '../types';
 
 interface ControlsProps {
@@ -20,6 +20,7 @@ interface ControlsProps {
   cursorPos: Point;
   degree: number;
   setDegree: (n: number) => void;
+  onResetPaths: () => void;
 }
 
 const Controls: React.FC<ControlsProps> = ({ 
@@ -37,7 +38,8 @@ const Controls: React.FC<ControlsProps> = ({
   setRowShift,
   cursorPos,
   degree,
-  setDegree
+  setDegree,
+  onResetPaths
 }) => {
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
@@ -235,6 +237,13 @@ const Controls: React.FC<ControlsProps> = ({
               title="Reset View"
           >
               <RotateCcw className="w-5 h-5" />
+          </button>
+          <button 
+              onClick={onResetPaths}
+              className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
+              title="Clear all traced paths"
+          >
+              <Eraser className="w-5 h-5" />
           </button>
           <button 
               onClick={handleZoomIn}

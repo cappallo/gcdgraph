@@ -12,6 +12,7 @@ interface InfiniteGraphProps {
   rowShift: number;
   onCursorMove: (p: Point) => void;
   degree: number;
+  resetPathsSignal: number;
 }
 
 const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ 
@@ -23,7 +24,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   showFactored,
   rowShift,
   onCursorMove,
-  degree
+  degree,
+  resetPathsSignal
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,6 +53,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   useEffect(() => {
     setTracedPath(null);
   }, [viewport, transformFunc, rowShift]);
+
+  // External reset for all user-created paths
+  useEffect(() => {
+    setTracedPath(null);
+    setCustomStarts([]);
+  }, [resetPathsSignal]);
 
   // Helper to calculate effective X based on row shift
   const getEffectiveX = useCallback((gx: number, gy: number) => {
