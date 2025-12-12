@@ -118,7 +118,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   useEffect(() => {
     setTracedPath(null);
     tracedAnchor.current = null;
-  }, [viewport, transformFunc, rowShift, randomizeShift]);
+  }, [transformFunc, rowShift, randomizeShift]);
 
   // External reset for all user-created paths
   useEffect(() => {
