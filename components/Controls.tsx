@@ -122,6 +122,10 @@ const Controls: React.FC<ControlsProps> = ({
     setTransformFunc(funcInput);
   };
 
+  const handleTransformBlur = () => {
+    setFuncInput(transformFunc);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
         commitFunc();
@@ -131,6 +135,10 @@ const Controls: React.FC<ControlsProps> = ({
 
   const commitAutoHighlight = () => {
     onApplyAutoHighlight(autoHighlightInput);
+  };
+
+  const handleAutoHighlightBlur = () => {
+    setAutoHighlightInput(autoHighlightExpr);
   };
 
   const handleAutoHighlightKeyDown = (e: React.KeyboardEvent) => {
@@ -238,9 +246,8 @@ const Controls: React.FC<ControlsProps> = ({
                        onChange={(e) => {
                          const val = e.target.value;
                          setFuncInput(val);
-                         setTransformFunc(val);
                        }}
-                        onBlur={commitFunc}
+                        onBlur={handleTransformBlur}
                         onKeyDown={handleKeyDown}
                         className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
                         placeholder="e.g. n^2 + 1"
@@ -257,7 +264,7 @@ const Controls: React.FC<ControlsProps> = ({
                     type="text"
                     value={autoHighlightInput}
                     onChange={(e) => setAutoHighlightInput(e.target.value)}
-                    onBlur={commitAutoHighlight}
+                    onBlur={handleAutoHighlightBlur}
                     onKeyDown={handleAutoHighlightKeyDown}
                     className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
                     placeholder="e.g. (2n^3, n^2)"
