@@ -52,6 +52,12 @@ export const getPrimeFactorCount = (n: number): number => {
   return count;
 };
 
+export const isPrime = (n: number): boolean => {
+  n = Math.abs(n);
+  if (n <= 1) return false;
+  return getSmallestPrimeFactor(n) === n;
+};
+
 // Format GCD string (e.g., prime factorization or simple value)
 // For visual simplicity in the graph, we mostly just return the number,
 // but we could expand to exponential notation like 2^2 * 3 if desired.

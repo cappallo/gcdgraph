@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, formatValue, createTransformFunction, getPrimeFactorCount } from '../utils/math';
+import { gcd, formatValue, createTransformFunction, getPrimeFactorCount, isPrime } from '../utils/math';
 import { Viewport, Point, Theme } from '../types';
 import { getRowShiftMagnitude } from '../utils/grid';
 
@@ -106,6 +106,10 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   // Trace Path State (Backward from click)
   const [tracedPath, setTracedPath] = useState<Point[] | null>(null);
   const tracedAnchor = useRef<Point | null>(null);
+  const canFastForward = useMemo(() => {
+    const t = transformFunc.trim().toLowerCase();
+    return t === 'n' || t === 'x';
+  }, [transformFunc]);
 
   // Create the transform function from string
   const activeTransform = useMemo(() => {
@@ -149,23 +153,41 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
   // Helper to trace a path forward from a given point
   const traceForward = useCallback((startX: number, startY: number) => {
-    const points: Point[] = [];
+    const points: Point[] = [{ x: startX, y: startY }];
     let currX = startX;
     let currY = startY;
     const maxSteps = Math.max(1, pathStepLimit);
-    
-    for (let step = 0; step < maxSteps; step++) {
-      points.push({ x: currX, y: currY });
-      
-      if (checkGoesNorth(currX, currY)) {
+    let stepsUsed = 0;
+
+    while (stepsUsed < maxSteps) {
+      const goesNorth = checkGoesNorth(currX, currY);
+      if (goesNorth) {
         currY += 1;
-      } else {
-        currX += 1;
+        stepsUsed += 1;
+        points.push({ x: currX, y: currY });
+        continue;
       }
-      
+
+      const p = Math.abs(currY);
+      const canJump = canFastForward && isPrime(p) && p > 1;
+
+      if (canJump) {
+        const effectiveX = getEffectiveX(currX, currY);
+        const rem = ((effectiveX % p) + p) % p;
+        const jump = rem === 0 ? 1 : Math.min(p - rem, maxSteps - stepsUsed);
+
+        currX += jump;
+        stepsUsed += jump;
+        points.push({ x: currX, y: currY });
+        continue;
+      }
+
+      currX += 1;
+      stepsUsed += 1;
+      points.push({ x: currX, y: currY });
     }
     return points;
-  }, [checkGoesNorth, pathStepLimit]);
+  }, [checkGoesNorth, pathStepLimit, canFastForward, getEffectiveX]);
 
   // Calculate user-defined custom paths
   const customPaths = useMemo(() => {
