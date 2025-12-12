@@ -310,9 +310,33 @@ export const createTransformFunction = (expression: string): ((x: number) => num
     return stack[0];
   };
 
+  const addImplicitMultiplication = (tokens: Token[]): Token[] => {
+    const result: Token[] = [];
+
+    const prevCanMultiply = (t: Token) =>
+      t.type === 'num' || t.type === 'var' || t.type === 'rparen';
+
+    const nextCanMultiply = (t: Token) =>
+      t.type === 'num' || t.type === 'var' || t.type === 'func' || t.type === 'lparen';
+
+    for (let i = 0; i < tokens.length; i++) {
+      const cur = tokens[i];
+      const prev = result[result.length - 1];
+
+      const isFunctionCall = prev && prev.type === 'func' && cur.type === 'lparen';
+      if (prev && prevCanMultiply(prev) && nextCanMultiply(cur) && !isFunctionCall) {
+        result.push({ type: 'op', value: '*' });
+      }
+
+      result.push(cur);
+    }
+
+    return result;
+  };
+
   const tokens = tokenize(expression.replace(/\s+/g, ''));
   if (!tokens) return (x) => x;
-  const rpn = toRpn(tokens);
+  const rpn = toRpn(addImplicitMultiplication(tokens));
   if (!rpn) return (x) => x;
 
   // Return an evaluator that works without eval/Function

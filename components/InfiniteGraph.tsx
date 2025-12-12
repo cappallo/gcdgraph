@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, formatValue, getPartitionColor, createTransformFunction, isComposite, getPrimeFactorCount } from '../utils/math';
+import { gcd, formatValue, createTransformFunction, getPrimeFactorCount } from '../utils/math';
 import { Viewport, Point, Theme } from '../types';
+import { getRowShiftMagnitude } from '../utils/grid';
 
 interface InfiniteGraphProps {
   viewport: Viewport;
@@ -10,11 +11,15 @@ interface InfiniteGraphProps {
   simpleView: boolean;
   showFactored: boolean;
   rowShift: number;
-  shiftLock: boolean;
   randomizeShift: boolean;
   onCursorMove: (p: Point) => void;
   degree: number;
   resetPathsSignal: number;
+  pathStarts: Point[];
+  onTogglePathStart: (p: Point) => void;
+  pathStepLimit: number;
+  pathCoordinateCap: number;
+  backtraceLimit: number;
 }
 
 // Calculate a readable text color (black/white) against a given background color.
@@ -79,11 +84,15 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   simpleView,
   showFactored,
   rowShift,
-  shiftLock,
   randomizeShift,
   onCursorMove,
   degree,
-  resetPathsSignal
+  resetPathsSignal,
+  pathStarts,
+  onTogglePathStart,
+  pathStepLimit,
+  pathCoordinateCap,
+  backtraceLimit
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -91,10 +100,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   const lastPos = useRef({ x: 0, y: 0 });
   const dragStartPos = useRef({ x: 0, y: 0 });
   const animationFrameId = useRef<number>(0);
-  const prevRowShiftConfig = useRef<{ k: number; randomize: boolean }>({
-    k: rowShift,
-    randomize: randomizeShift
-  });
 
   // Multitouch State
   const evCache = useRef<Map<number, {id: number, x: number, y: number}>>(new Map());
@@ -103,9 +108,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
   // Trace Path State (Backward from click)
   const [tracedPath, setTracedPath] = useState<Point[] | null>(null);
-
-  // Custom Forward Paths (Forward from right-click)
-  const [customStarts, setCustomStarts] = useState<Point[]>([]);
+  const tracedAnchor = useRef<Point | null>(null);
 
   // Create the transform function from string
   const activeTransform = useMemo(() => {
@@ -114,25 +117,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
   useEffect(() => {
     setTracedPath(null);
+    tracedAnchor.current = null;
   }, [viewport, transformFunc, rowShift, randomizeShift]);
 
   // External reset for all user-created paths
   useEffect(() => {
     setTracedPath(null);
-    setCustomStarts([]);
+    tracedAnchor.current = null;
   }, [resetPathsSignal]);
-
-  // Magnitude of horizontal shift for a given row
-  const getRowShiftMagnitude = useCallback((gy: number, k: number, useRandom: boolean) => {
-    if (k <= 0 || Math.abs(gy) > k) return 0;
-    if (!useRandom) return k;
-
-    // Deterministic pseudo-random in [0, k-1] per row/k combo
-    const seed = gy * 374761393 + k * 668265263;
-    const noise = Math.abs(Math.sin(seed) * 10000);
-    const fraction = noise - Math.floor(noise);
-    return Math.floor(fraction * k);
-  }, []);
 
   // Helper to calculate effective X based on row shift
   const getEffectiveX = useCallback((gx: number, gy: number) => {
@@ -145,40 +137,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   }, [rowShift, randomizeShift, getRowShiftMagnitude]);
 
   // Offset helper used to keep custom start nodes aligned with row shifts
-  const getRowOffset = useCallback((gy: number, k: number, useRandom: boolean) => {
-    const magnitude = getRowShiftMagnitude(gy, k, useRandom);
-    if (gy > 0) return magnitude;
-    if (gy < 0) return -magnitude;
-    return 0;
-  }, [getRowShiftMagnitude]);
-
-  // Shift custom path starting nodes when unlocked so they follow row adjustments
-  useEffect(() => {
-    const previous = prevRowShiftConfig.current;
-    const sameConfig = previous.k === rowShift && previous.randomize === randomizeShift;
-
-    if (shiftLock || sameConfig) {
-      prevRowShiftConfig.current = { k: rowShift, randomize: randomizeShift };
-      return;
-    }
-
-    setCustomStarts((starts) => {
-      if (starts.length === 0) return starts;
-
-      let changed = false;
-      const next = starts.map((p) => {
-        const delta = getRowOffset(p.y, rowShift, randomizeShift) - getRowOffset(p.y, previous.k, previous.randomize);
-        if (delta === 0) return p;
-        changed = true;
-        return { ...p, x: p.x + delta };
-      });
-
-      return changed ? next : starts;
-    });
-
-    prevRowShiftConfig.current = { k: rowShift, randomize: randomizeShift };
-  }, [rowShift, shiftLock, randomizeShift, getRowOffset]);
-
   // Logic helper: Determine direction based on Coprime rule + Row Shift
   const checkGoesNorth = useCallback((gx: number, gy: number) => {
     const effectiveX = getEffectiveX(gx, gy);
@@ -193,10 +151,11 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   }, [activeTransform, getEffectiveX]);
 
   // Helper to trace a path forward from a given point
-  const traceForward = useCallback((startX: number, startY: number, maxSteps: number = 5000) => {
+  const traceForward = useCallback((startX: number, startY: number) => {
     const points: Point[] = [];
     let currX = startX;
     let currY = startY;
+    const maxSteps = Math.max(1, pathStepLimit);
     
     for (let step = 0; step < maxSteps; step++) {
       points.push({ x: currX, y: currY });
@@ -207,14 +166,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         currX += 1;
       }
       
-      if (currX > 5000 || currY > 5000) break;
+      if (Math.abs(currX) > pathCoordinateCap || Math.abs(currY) > pathCoordinateCap) break;
     }
     return points;
-  }, [checkGoesNorth]);
+  }, [checkGoesNorth, pathCoordinateCap, pathStepLimit]);
 
   // Calculate user-defined custom paths
   const customPaths = useMemo(() => {
-    return customStarts.map(start => {
+    return pathStarts.map(start => {
       // Deterministic color based on coordinates
       const hue = ((start.x * 37 + start.y * 19) * 137.508) % 360;
       return {
@@ -222,7 +181,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         points: traceForward(start.x, start.y)
       };
     });
-  }, [customStarts, traceForward]);
+  }, [pathStarts, traceForward]);
 
   // Rendering Loop
   const render = useCallback(() => {
@@ -584,36 +543,38 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [render]);
 
-  const findPathToOrigin = (start: Point): Point[] => {
+  const findPathToLeftmost = (start: Point): Point[] => {
+    if (Math.abs(start.x) > pathCoordinateCap || Math.abs(start.y) > pathCoordinateCap) return [];
     const q: Point[] = [start];
     const parent = new Map<string, Point | null>();
-    parent.set(`${start.x},${start.y}`, null);
+    const startKey = `${start.x},${start.y}`;
+    parent.set(startKey, null);
     
     const visited = new Set<string>();
-    visited.add(`${start.x},${start.y}`);
+    visited.add(startKey);
 
-    let foundOrigin = false;
     let steps = 0;
-    const maxSteps = 4000;
+    const maxSteps = Math.max(1, backtraceLimit);
+    let best = start;
 
     while (q.length > 0 && steps < maxSteps) {
         const curr = q.shift()!;
         steps++;
 
-        if (curr.x === 0 && curr.y === 0) {
-            foundOrigin = true;
-            break;
+        if (curr.x < best.x || (curr.x === best.x && curr.y < best.y)) {
+            best = curr;
         }
 
-        // Neighbors that could connect TO curr
+        // Neighbors that could connect TO curr (west/south)
         const candidates = [
-            { x: curr.x - 1, y: curr.y }, // Neighbor West
-            { x: curr.x, y: curr.y - 1 }  // Neighbor South
+            { x: curr.x - 1, y: curr.y },
+            { x: curr.x, y: curr.y - 1 }
         ];
 
         for (const cand of candidates) {
             const key = `${cand.x},${cand.y}`;
             if (visited.has(key)) continue;
+            if (Math.abs(cand.x) > pathCoordinateCap || Math.abs(cand.y) > pathCoordinateCap) continue;
 
             // Determine if 'cand' actually points to 'curr'
             let connects = false;
@@ -635,20 +596,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         }
     }
 
-    if (!foundOrigin) return [];
-
+    // Reconstruct path from start to best (leftmost) using parents
     const path: Point[] = [];
-    let trace: Point | undefined | null = { x: 0, y: 0 };
-
+    let trace: Point | null | undefined = best;
     while (trace) {
         path.push(trace);
         trace = parent.get(`${trace.x},${trace.y}`);
-        if (trace && trace.x === start.x && trace.y === start.y) {
-            path.push(trace);
-            break;
-        }
     }
-    return path;
+    return path.reverse();
   };
 
   const performZoom = (scaleFactor: number, centerClientX: number, centerClientY: number) => {
@@ -776,13 +731,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
              const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
              const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
 
-             setCustomStarts(prev => {
-                const exists = prev.find(p => p.x === gx && p.y === gy);
-                if (exists) {
-                    return prev.filter(p => p !== exists);
-                }
-                return [...prev, { x: gx, y: gy }];
-             });
+             onTogglePathStart({ x: gx, y: gy });
          }
     }
 
@@ -822,16 +771,34 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
     const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
 
-    const path = findPathToOrigin({ x: gx, y: gy });
+    const key = `${gx},${gy}`;
+    if (tracedAnchor.current && `${tracedAnchor.current.x},${tracedAnchor.current.y}` === key) {
+      setTracedPath(null);
+      tracedAnchor.current = null;
+      return;
+    }
+
+    const path = findPathToLeftmost({ x: gx, y: gy });
+    tracedAnchor.current = { x: gx, y: gy };
     setTracedPath(path);
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
+  const handleWheel = useCallback((e: WheelEvent | React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = 1.1;
     const direction = e.deltaY > 0 ? 1 / zoomFactor : zoomFactor;
     performZoom(direction, e.clientX, e.clientY);
-  };
+  }, [performZoom]);
+
+  // Ensure wheel listener is non-passive so we can preventDefault without warnings
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const listener = (evt: WheelEvent) => handleWheel(evt);
+    el.addEventListener('wheel', listener, { passive: false });
+    return () => el.removeEventListener('wheel', listener);
+  }, [handleWheel]);
 
   return (
     <div 
@@ -843,7 +810,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       onPointerLeave={handlePointerLeave}
       onPointerCancel={handlePointerLeave}
       onContextMenu={handleContextMenu}
-      onWheel={handleWheel}
     >
       <canvas ref={canvasRef} className="block w-full h-full" />
     </div>

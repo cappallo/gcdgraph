@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Minus, RotateCcw, Move, Moon, Sun, SlidersHorizontal, Eraser } from 'lucide-react';
+import { Plus, Minus, RotateCcw, Move, Moon, Sun, SlidersHorizontal, Eraser, ChevronDown } from 'lucide-react';
 import { Viewport, Theme, Point } from '../types';
 
 interface ControlsProps {
@@ -25,6 +25,17 @@ interface ControlsProps {
   degree: number;
   setDegree: (n: number) => void;
   onResetPaths: () => void;
+  autoHighlightExpr: string;
+  onApplyAutoHighlight: (s: string) => void;
+  autoHighlightError?: string;
+  autoHighlightRange: { min: number; max: number };
+  setAutoHighlightRange: (range: Partial<{ min: number; max: number }>) => void;
+  coordinateCap: number;
+  setCoordinateCap: (n: number) => void;
+  pathStepLimit: number;
+  setPathStepLimit: (n: number) => void;
+  backtraceLimit: number;
+  setBacktraceLimit: (n: number) => void;
 }
 
 const Controls: React.FC<ControlsProps> = ({ 
@@ -47,15 +58,49 @@ const Controls: React.FC<ControlsProps> = ({
   cursorPos,
   degree,
   setDegree,
-  onResetPaths
+  onResetPaths,
+  autoHighlightExpr,
+  onApplyAutoHighlight,
+  autoHighlightError,
+  autoHighlightRange,
+  setAutoHighlightRange,
+  coordinateCap,
+  setCoordinateCap,
+  pathStepLimit,
+  setPathStepLimit,
+  backtraceLimit,
+  setBacktraceLimit
 }) => {
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
   const [showSettings, setShowSettings] = useState(true);
+  const [autoHighlightInput, setAutoHighlightInput] = useState(autoHighlightExpr);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [rangeMinInput, setRangeMinInput] = useState(autoHighlightRange.min.toString());
+  const [rangeMaxInput, setRangeMaxInput] = useState(autoHighlightRange.max.toString());
+  const [coordinateCapInput, setCoordinateCapInput] = useState(coordinateCap.toString());
+  const [pathStepLimitInput, setPathStepLimitInput] = useState(pathStepLimit.toString());
+  const [backtraceLimitInput, setBacktraceLimitInput] = useState(backtraceLimit.toString());
 
   useEffect(() => {
     setFuncInput(transformFunc);
   }, [transformFunc]);
+  useEffect(() => {
+    setAutoHighlightInput(autoHighlightExpr);
+  }, [autoHighlightExpr]);
+  useEffect(() => {
+    setRangeMinInput(autoHighlightRange.min.toString());
+    setRangeMaxInput(autoHighlightRange.max.toString());
+  }, [autoHighlightRange.min, autoHighlightRange.max]);
+  useEffect(() => {
+    setCoordinateCapInput(coordinateCap.toString());
+  }, [coordinateCap]);
+  useEffect(() => {
+    setPathStepLimitInput(pathStepLimit.toString());
+  }, [pathStepLimit]);
+  useEffect(() => {
+    setBacktraceLimitInput(backtraceLimit.toString());
+  }, [backtraceLimit]);
   
   const handleZoomIn = () => {
     setViewport({ ...viewport, zoom: Math.min(viewport.zoom * 1.2, 200) });
@@ -81,6 +126,62 @@ const Controls: React.FC<ControlsProps> = ({
     if (e.key === 'Enter') {
         commitFunc();
         (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  const commitAutoHighlight = () => {
+    onApplyAutoHighlight(autoHighlightInput);
+  };
+
+  const handleAutoHighlightKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      commitAutoHighlight();
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  const commitRangeMin = () => {
+    const num = Number(rangeMinInput);
+    if (Number.isFinite(num)) {
+      setAutoHighlightRange({ min: num });
+    } else {
+      setRangeMinInput(autoHighlightRange.min.toString());
+    }
+  };
+
+  const commitRangeMax = () => {
+    const num = Number(rangeMaxInput);
+    if (Number.isFinite(num)) {
+      setAutoHighlightRange({ max: num });
+    } else {
+      setRangeMaxInput(autoHighlightRange.max.toString());
+    }
+  };
+
+  const commitCoordinateCap = () => {
+    const num = Number(coordinateCapInput);
+    if (Number.isFinite(num)) {
+      setCoordinateCap(num);
+    } else {
+      setCoordinateCapInput(coordinateCap.toString());
+    }
+  };
+
+  const commitPathStepLimit = () => {
+    const num = Number(pathStepLimitInput);
+    if (Number.isFinite(num)) {
+      setPathStepLimit(num);
+    } else {
+      setPathStepLimitInput(pathStepLimit.toString());
+    }
+  };
+
+  const commitBacktraceLimit = () => {
+    const num = Number(backtraceLimitInput);
+    if (Number.isFinite(num)) {
+      setBacktraceLimit(num);
+    } else {
+      setBacktraceLimitInput(backtraceLimit.toString());
     }
   };
 
@@ -145,6 +246,26 @@ const Controls: React.FC<ControlsProps> = ({
                         placeholder="e.g. n^2 + 1"
                     />
                 </div>
+            </div>
+
+            {/* Auto Highlight Input */}
+            <div className="mt-4">
+                <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Auto highlight (x(n), y(n)):
+                </label>
+                <input
+                    type="text"
+                    value={autoHighlightInput}
+                    onChange={(e) => setAutoHighlightInput(e.target.value)}
+                    onBlur={commitAutoHighlight}
+                    onKeyDown={handleAutoHighlightKeyDown}
+                    className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
+                    placeholder="e.g. (2n^3, n^2)"
+                />
+                <p className="text-[10px] opacity-60 mt-1">Press enter to apply; uses n from the Advanced range.</p>
+                {autoHighlightError && (
+                  <p className="text-[10px] text-red-400 mt-1">{autoHighlightError}</p>
+                )}
             </div>
 
             {/* Row Shift Slider */}
@@ -233,8 +354,96 @@ const Controls: React.FC<ControlsProps> = ({
                          onChange={(e) => setDegree(parseInt(e.target.value))}
                          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                      />
-                  </div>
+                 </div>
                 )}
+            </div>
+
+            {/* Advanced settings */}
+            <div className={`mt-5 pt-3 border-t ${isDark ? 'border-gray-700/70' : 'border-gray-200'}`}>
+              <button
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className={`w-full flex items-center justify-between text-sm font-semibold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}
+              >
+                <span>Advanced</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showAdvanced && (
+                <div className="mt-3 space-y-3 text-sm">
+                  <div>
+                    <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                      Auto highlight n range
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        value={rangeMinInput}
+                        onChange={(e) => setRangeMinInput(e.target.value)}
+                        onBlur={commitRangeMin}
+                        onKeyDown={(e) => e.key === 'Enter' && commitRangeMin()}
+                        className={`w-1/2 px-2 py-1 rounded border ${inputClass} text-sm`}
+                      />
+                      <input
+                        type="number"
+                        value={rangeMaxInput}
+                        onChange={(e) => setRangeMaxInput(e.target.value)}
+                        onBlur={commitRangeMax}
+                        onKeyDown={(e) => e.key === 'Enter' && commitRangeMax()}
+                        className={`w-1/2 px-2 py-1 rounded border ${inputClass} text-sm`}
+                      />
+                    </div>
+                    <p className="text-[10px] opacity-60 mt-1">Inclusive range for n when auto-highlighting.</p>
+                  </div>
+
+                  <div>
+                    <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                      Coordinate cap
+                    </label>
+                    <input
+                      type="number"
+                      value={coordinateCapInput}
+                      onChange={(e) => setCoordinateCapInput(e.target.value)}
+                      onBlur={commitCoordinateCap}
+                      onKeyDown={(e) => e.key === 'Enter' && commitCoordinateCap()}
+                      className={`w-full px-2 py-1 rounded border ${inputClass} text-sm`}
+                    />
+                    <p className="text-[10px] opacity-60 mt-1">
+                      Stops auto highlights and paths when |x| or |y| exceed this value.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Path step limit
+                      </label>
+                      <input
+                        type="number"
+                        value={pathStepLimitInput}
+                        onChange={(e) => setPathStepLimitInput(e.target.value)}
+                        onBlur={commitPathStepLimit}
+                        onKeyDown={(e) => e.key === 'Enter' && commitPathStepLimit()}
+                        className={`w-full px-2 py-1 rounded border ${inputClass} text-sm`}
+                      />
+                      <p className="text-[10px] opacity-60 mt-1">Max steps drawn for forward paths.</p>
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Backtrace limit
+                      </label>
+                      <input
+                        type="number"
+                        value={backtraceLimitInput}
+                        onChange={(e) => setBacktraceLimitInput(e.target.value)}
+                        onBlur={commitBacktraceLimit}
+                        onKeyDown={(e) => e.key === 'Enter' && commitBacktraceLimit()}
+                        className={`w-full px-2 py-1 rounded border ${inputClass} text-sm`}
+                      />
+                      <p className="text-[10px] opacity-60 mt-1">Steps searched when tracing to the origin.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
