@@ -18,7 +18,6 @@ interface InfiniteGraphProps {
   pathStarts: Point[];
   onTogglePathStart: (p: Point) => void;
   pathStepLimit: number;
-  pathCoordinateCap: number;
   backtraceLimit: number;
 }
 
@@ -91,7 +90,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   pathStarts,
   onTogglePathStart,
   pathStepLimit,
-  pathCoordinateCap,
   backtraceLimit
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -165,10 +163,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         currX += 1;
       }
       
-      if (Math.abs(currX) > pathCoordinateCap || Math.abs(currY) > pathCoordinateCap) break;
     }
     return points;
-  }, [checkGoesNorth, pathCoordinateCap, pathStepLimit]);
+  }, [checkGoesNorth, pathStepLimit]);
 
   // Calculate user-defined custom paths
   const customPaths = useMemo(() => {
@@ -537,7 +534,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   }, [render]);
 
   const findPathToLeftmost = (start: Point): Point[] => {
-    if (Math.abs(start.x) > pathCoordinateCap || Math.abs(start.y) > pathCoordinateCap) return [];
     const q: Point[] = [start];
     const parent = new Map<string, Point | null>();
     const startKey = `${start.x},${start.y}`;
@@ -567,8 +563,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         for (const cand of candidates) {
             const key = `${cand.x},${cand.y}`;
             if (visited.has(key)) continue;
-            if (Math.abs(cand.x) > pathCoordinateCap || Math.abs(cand.y) > pathCoordinateCap) continue;
-
             // Determine if 'cand' actually points to 'curr'
             let connects = false;
             const candGoesNorth = checkGoesNorth(cand.x, cand.y);
@@ -605,7 +599,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const mouseX = centerClientX - rect.left;
     const mouseY = centerClientY - rect.top;
     
-    const newZoom = Math.min(Math.max(viewport.zoom * scaleFactor, 0.5), 200);
+    const newZoom = Math.min(viewport.zoom * scaleFactor, 200);
 
     const width = rect.width;
     const height = rect.height;

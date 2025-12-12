@@ -8,7 +8,6 @@ import { getRowOffset, pointKey } from './utils/grid';
 const STORAGE_KEY = 'gcdgraph-settings';
 const DEFAULT_VIEWPORT: Viewport = { x: 12, y: 8, zoom: 45 };
 const MAX_HIGHLIGHT_POINTS = 500;
-const DEFAULT_COORD_CAP = 50000;
 
 interface HighlightRange {
   min: number;
@@ -52,7 +51,6 @@ function App() {
 
   const [autoHighlightExpr, setAutoHighlightExpr] = useState<string>('');
   const [autoHighlightRange, setAutoHighlightRange] = useState<HighlightRange>({ min: 1, max: 25 });
-  const [coordinateCap, setCoordinateCap] = useState<number>(DEFAULT_COORD_CAP);
   const [pathStepLimit, setPathStepLimit] = useState<number>(5000);
   const [backtraceLimit, setBacktraceLimit] = useState<number>(4000);
 
@@ -90,7 +88,6 @@ function App() {
           max: clampInt(data.autoHighlightRange.max, 25, -2000, 2000)
         });
       }
-      if (Number.isFinite(data.coordinateCap)) setCoordinateCap(clampInt(data.coordinateCap, DEFAULT_COORD_CAP, 10, 200000));
       if (Number.isFinite(data.pathStepLimit)) setPathStepLimit(clampInt(data.pathStepLimit, 5000, 10, 50000));
       if (Number.isFinite(data.backtraceLimit)) setBacktraceLimit(clampInt(data.backtraceLimit, 4000, 10, 50000));
       if (Array.isArray(data.manualNodes)) setManualNodes(dedupePoints(data.manualNodes));
@@ -117,7 +114,6 @@ function App() {
       degree,
       autoHighlightExpr,
       autoHighlightRange,
-      coordinateCap,
       pathStepLimit,
       backtraceLimit,
       manualNodes,
@@ -137,7 +133,6 @@ function App() {
     degree,
     autoHighlightExpr,
     autoHighlightRange,
-    coordinateCap,
     pathStepLimit,
     backtraceLimit,
     manualNodes,
@@ -217,13 +212,6 @@ function App() {
           return { points: [] as Point[], error: 'Expression produced a non-finite value.' };
         }
 
-        if (Math.abs(x) > coordinateCap || Math.abs(y) > coordinateCap) {
-          return {
-            points: [] as Point[],
-            error: `Values exceed coordinate cap (${coordinateCap}). Reduce n range or cap.`
-          };
-        }
-
         const key = pointKey({ x, y });
         if (!seen.has(key)) {
           seen.add(key);
@@ -233,7 +221,7 @@ function App() {
 
       return { points, error: '' };
     },
-    [sanitizedRange, coordinateCap]
+    [sanitizedRange]
   );
 
   const autoHighlightResult = useMemo(
@@ -286,18 +274,13 @@ function App() {
     });
   }, []);
 
-  const handleCoordinateCap = useCallback(
-    (val: number) => setCoordinateCap(clampInt(val, coordinateCap, 10, 200000)),
-    [coordinateCap]
-  );
-
   const handlePathStepLimit = useCallback(
-    (val: number) => setPathStepLimit(clampInt(val, pathStepLimit, 10, 50000)),
+    (val: number) => setPathStepLimit(clampInt(val, pathStepLimit, 1, 10000000)),
     [pathStepLimit]
   );
 
   const handleBacktraceLimit = useCallback(
-    (val: number) => setBacktraceLimit(clampInt(val, backtraceLimit, 10, 50000)),
+    (val: number) => setBacktraceLimit(clampInt(val, backtraceLimit, 1, 10000000)),
     [backtraceLimit]
   );
 
@@ -322,7 +305,6 @@ function App() {
         pathStarts={manualNodes}
         onTogglePathStart={togglePathStart}
         pathStepLimit={pathStepLimit}
-        pathCoordinateCap={coordinateCap}
         backtraceLimit={backtraceLimit}
       />
       <Controls
@@ -351,8 +333,6 @@ function App() {
         autoHighlightError={autoHighlightResult.error}
         autoHighlightRange={sanitizedRange}
         setAutoHighlightRange={handleRangeChange}
-        coordinateCap={coordinateCap}
-        setCoordinateCap={handleCoordinateCap}
         pathStepLimit={pathStepLimit}
         setPathStepLimit={handlePathStepLimit}
         backtraceLimit={backtraceLimit}

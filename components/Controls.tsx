@@ -30,8 +30,6 @@ interface ControlsProps {
   autoHighlightError?: string;
   autoHighlightRange: { min: number; max: number };
   setAutoHighlightRange: (range: Partial<{ min: number; max: number }>) => void;
-  coordinateCap: number;
-  setCoordinateCap: (n: number) => void;
   pathStepLimit: number;
   setPathStepLimit: (n: number) => void;
   backtraceLimit: number;
@@ -64,8 +62,6 @@ const Controls: React.FC<ControlsProps> = ({
   autoHighlightError,
   autoHighlightRange,
   setAutoHighlightRange,
-  coordinateCap,
-  setCoordinateCap,
   pathStepLimit,
   setPathStepLimit,
   backtraceLimit,
@@ -78,7 +74,6 @@ const Controls: React.FC<ControlsProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [rangeMinInput, setRangeMinInput] = useState(autoHighlightRange.min.toString());
   const [rangeMaxInput, setRangeMaxInput] = useState(autoHighlightRange.max.toString());
-  const [coordinateCapInput, setCoordinateCapInput] = useState(coordinateCap.toString());
   const [pathStepLimitInput, setPathStepLimitInput] = useState(pathStepLimit.toString());
   const [backtraceLimitInput, setBacktraceLimitInput] = useState(backtraceLimit.toString());
 
@@ -93,9 +88,6 @@ const Controls: React.FC<ControlsProps> = ({
     setRangeMaxInput(autoHighlightRange.max.toString());
   }, [autoHighlightRange.min, autoHighlightRange.max]);
   useEffect(() => {
-    setCoordinateCapInput(coordinateCap.toString());
-  }, [coordinateCap]);
-  useEffect(() => {
     setPathStepLimitInput(pathStepLimit.toString());
   }, [pathStepLimit]);
   useEffect(() => {
@@ -107,7 +99,7 @@ const Controls: React.FC<ControlsProps> = ({
   };
 
   const handleZoomOut = () => {
-    setViewport({ ...viewport, zoom: Math.max(viewport.zoom / 1.2, 0.5) });
+    setViewport({ ...viewport, zoom: viewport.zoom / 1.2 });
   };
 
   const handleReset = () => {
@@ -163,15 +155,6 @@ const Controls: React.FC<ControlsProps> = ({
       setAutoHighlightRange({ max: num });
     } else {
       setRangeMaxInput(autoHighlightRange.max.toString());
-    }
-  };
-
-  const commitCoordinateCap = () => {
-    const num = Number(coordinateCapInput);
-    if (Number.isFinite(num)) {
-      setCoordinateCap(num);
-    } else {
-      setCoordinateCapInput(coordinateCap.toString());
     }
   };
 
@@ -400,23 +383,6 @@ const Controls: React.FC<ControlsProps> = ({
                       />
                     </div>
                     <p className="text-[10px] opacity-60 mt-1">Inclusive range for n when auto-highlighting.</p>
-                  </div>
-
-                  <div>
-                    <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                      Coordinate cap
-                    </label>
-                    <input
-                      type="number"
-                      value={coordinateCapInput}
-                      onChange={(e) => setCoordinateCapInput(e.target.value)}
-                      onBlur={commitCoordinateCap}
-                      onKeyDown={(e) => e.key === 'Enter' && commitCoordinateCap()}
-                      className={`w-full px-2 py-1 rounded border ${inputClass} text-sm`}
-                    />
-                    <p className="text-[10px] opacity-60 mt-1">
-                      Stops auto highlights and paths when |x| or |y| exceed this value.
-                    </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
