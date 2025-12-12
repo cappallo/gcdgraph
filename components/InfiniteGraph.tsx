@@ -99,7 +99,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const dragStartPos = useRef({ x: 0, y: 0 });
-  const animationFrameId = useRef<number>(0);
 
   // Multitouch State
   const evCache = useRef<Map<number, {id: number, x: number, y: number}>>(new Map());
@@ -512,15 +511,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
   }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, rowShift, showFactored, getEffectiveX, degree]);
 
+  // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {
-    const loop = () => {
-      render();
-      animationFrameId.current = requestAnimationFrame(loop);
-    };
-    loop();
-    return () => {
-      if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
-    };
+    render();
   }, [render]);
 
   useEffect(() => {
