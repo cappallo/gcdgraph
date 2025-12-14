@@ -813,7 +813,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
   const handleWheel = useCallback((e: WheelEvent | React.WheelEvent) => {
     e.preventDefault();
-    const zoomFactor = 1.1;
+    const zoomFactor = Math.pow(1.1, 3);
     const direction = e.deltaY > 0 ? 1 / zoomFactor : zoomFactor;
     performZoom(direction, e.clientX, e.clientY);
   }, [performZoom]);

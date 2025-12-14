@@ -203,8 +203,9 @@ const Controls: React.FC<ControlsProps> = ({
             <span className="w-32">X: {cursorPos.x}</span>
             <span className="w-32">Y: {cursorPos.y}</span>
          </div>
-         <div className={`text-xs mt-1 font-mono opacity-60 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-            X: {formatFactoredInt(cursorPos.x)} &nbsp; Y: {formatFactoredInt(cursorPos.y)}
+         <div className={`flex gap-6 text-base mt-2 font-mono ${isDark ? 'text-white' : 'text-gray-700'}`}>
+            <span className="w-32 text-center">{formatFactoredInt(cursorPos.x)}</span>
+            <span className="w-32 text-center">{formatFactoredInt(cursorPos.y)}</span>
          </div>
          <div className={`text-xs mt-1 font-mono opacity-60 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
             Zoom: {viewport.zoom.toFixed(1)}
