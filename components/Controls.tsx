@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Minus, RotateCcw, Move, Moon, Sun, SlidersHorizontal, Eraser, ChevronDown } from 'lucide-react';
 import { Viewport, Theme, Point } from '../types';
+import { formatValue } from '../utils/math';
 
 interface ControlsProps {
   viewport: Viewport;
@@ -34,6 +35,7 @@ interface ControlsProps {
   setPathStepLimit: (n: number) => void;
   backtraceLimit: number;
   setBacktraceLimit: (n: number) => void;
+  backtrailLength: number | null;
 }
 
 const Controls: React.FC<ControlsProps> = ({ 
@@ -65,7 +67,8 @@ const Controls: React.FC<ControlsProps> = ({
   pathStepLimit,
   setPathStepLimit,
   backtraceLimit,
-  setBacktraceLimit
+  setBacktraceLimit,
+  backtrailLength
 }) => {
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
@@ -172,6 +175,17 @@ const Controls: React.FC<ControlsProps> = ({
   const panelClass = isDark 
     ? 'bg-gray-800/90 border-gray-700 text-gray-200' 
     : 'bg-white/90 border-gray-200 text-gray-800';
+
+  const formatFactoredInt = (n: number) => {
+    if (!Number.isFinite(n)) return String(n);
+    if (n === 0) return '0';
+    if (n === 1) return '1';
+    if (n === -1) return '-1';
+    const sign = n < 0 ? '-' : '';
+    const abs = Math.abs(Math.round(n));
+    const factored = formatValue(abs);
+    return `${sign}${factored || abs.toString()}`;
+  };
   
   const btnClass = isDark
     ? 'bg-gray-800 text-gray-200 hover:bg-gray-700 border-gray-700'
@@ -190,8 +204,16 @@ const Controls: React.FC<ControlsProps> = ({
             <span className="w-32">Y: {cursorPos.y}</span>
          </div>
          <div className={`text-xs mt-1 font-mono opacity-60 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+            X: {formatFactoredInt(cursorPos.x)} &nbsp; Y: {formatFactoredInt(cursorPos.y)}
+         </div>
+         <div className={`text-xs mt-1 font-mono opacity-60 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
             Zoom: {viewport.zoom.toFixed(1)}
          </div>
+         {typeof backtrailLength === 'number' && backtrailLength > 0 && (
+           <div className={`text-xs mt-1 font-mono opacity-60 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+             Length: {backtrailLength}
+           </div>
+         )}
       </div>
 
       <div className="absolute top-4 right-4 flex flex-col gap-2 items-end pointer-events-none select-none">

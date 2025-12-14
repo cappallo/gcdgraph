@@ -19,6 +19,7 @@ interface InfiniteGraphProps {
   onTogglePathStart: (p: Point) => void;
   pathStepLimit: number;
   backtraceLimit: number;
+  onBacktrailChange?: (len: number | null) => void;
 }
 
 // Calculate a readable text color (black/white) against a given background color.
@@ -90,7 +91,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   pathStarts,
   onTogglePathStart,
   pathStepLimit,
-  backtraceLimit
+  backtraceLimit,
+  onBacktrailChange
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -126,6 +128,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     setTracedPath(null);
     tracedAnchor.current = null;
   }, [resetPathsSignal]);
+
+  useEffect(() => {
+    if (!onBacktrailChange) return;
+    if (tracedPath && tracedPath.length > 0) onBacktrailChange(tracedPath.length);
+    else onBacktrailChange(null);
+  }, [tracedPath, onBacktrailChange]);
 
   // Helper to calculate effective X based on row shift
   const getEffectiveX = useCallback((gx: number, gy: number) => {
@@ -740,7 +748,18 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
              const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
              const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
 
-             onTogglePathStart({ x: gx, y: gy });
+             const clicked = { x: gx, y: gy };
+             const tracedKey = tracedAnchor.current ? `${tracedAnchor.current.x},${tracedAnchor.current.y}` : '';
+             const clickedKey = `${clicked.x},${clicked.y}`;
+
+             if (tracedPath && tracedPath.length > 0 && tracedKey && tracedKey === clickedKey) {
+               const target = tracedPath[tracedPath.length - 1] ?? clicked;
+               setTracedPath(null);
+               tracedAnchor.current = null;
+               onTogglePathStart(target);
+             } else {
+               onTogglePathStart(clicked);
+             }
          }
     }
 
