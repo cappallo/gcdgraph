@@ -5,7 +5,7 @@ import { getRowShiftMagnitude } from '../utils/grid';
 
 interface InfiniteGraphProps {
   viewport: Viewport;
-  onViewportChange: (v: Viewport) => void;
+  onViewportChange: React.Dispatch<React.SetStateAction<Viewport>>;
   theme: Theme;
   transformFunc: string;
   simpleView: boolean;
@@ -629,22 +629,24 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const mouseX = centerClientX - rect.left;
     const mouseY = centerClientY - rect.top;
     
-    const newZoom = Math.min(viewport.zoom * scaleFactor, 200);
-
     const width = rect.width;
     const height = rect.height;
     
-    // Zoom towards the center point
-    const mouseGraphX = (mouseX - width/2) / viewport.zoom + viewport.x;
-    const mouseGraphY = -(mouseY - height/2) / viewport.zoom + viewport.y; 
-    
-    const newX = mouseGraphX - (mouseX - width/2) / newZoom;
-    const newY = mouseGraphY + (mouseY - height/2) / newZoom;
+    onViewportChange((prev) => {
+      const newZoom = Math.min(prev.zoom * scaleFactor, 200);
 
-    onViewportChange({
+      // Zoom towards the center point
+      const mouseGraphX = (mouseX - width / 2) / prev.zoom + prev.x;
+      const mouseGraphY = -((mouseY - height / 2) / prev.zoom - prev.y);
+
+      const newX = mouseGraphX - (mouseX - width / 2) / newZoom;
+      const newY = mouseGraphY + (mouseY - height / 2) / newZoom;
+
+      return {
         x: newX,
         y: newY,
         zoom: newZoom
+      };
     });
   };
 
@@ -716,11 +718,11 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const dx = e.clientX - lastPos.current.x;
         const dy = e.clientY - lastPos.current.y;
         lastPos.current = { x: e.clientX, y: e.clientY };
-        onViewportChange({
-          ...viewport,
-          x: viewport.x - dx / viewport.zoom,
-          y: viewport.y + dy / viewport.zoom,
-        });
+        onViewportChange((prev) => ({
+          ...prev,
+          x: prev.x - dx / prev.zoom,
+          y: prev.y + dy / prev.zoom
+        }));
     }
   };
 
