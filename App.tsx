@@ -4,7 +4,7 @@ import Controls from './components/Controls';
 import { Viewport, Theme, Point } from './types';
 import { createTransformFunction } from './utils/math';
 import { getRowOffset, pointKey } from './utils/grid';
-import { compileMoveRightPredicate, DEFAULT_MOVE_RIGHT_EXPR } from './utils/moveRule';
+import { compileMoveRightPredicate, DEFAULT_MOVE_RIGHT_EXPR, MovePredicate } from './utils/moveRule';
 
 const STORAGE_KEY = 'gcdgraph-settings';
 const DEFAULT_VIEWPORT: Viewport = { x: 12, y: 8, zoom: 45 };

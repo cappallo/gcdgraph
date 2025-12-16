@@ -1,14 +1,15 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, formatValue, createTransformFunction, getPrimeFactorCount, isPrime } from '../utils/math';
+import { gcd, gcdBigInt, formatValue, createTransformFunction, getPrimeFactorCount, isPrime, TransformFunction } from '../utils/math';
 import { Viewport, Point, Theme } from '../types';
 import { getRowShiftMagnitude } from '../utils/grid';
+import { MovePredicate } from '../utils/moveRule';
 
 interface InfiniteGraphProps {
   viewport: Viewport;
   onViewportChange: React.Dispatch<React.SetStateAction<Viewport>>;
   theme: Theme;
   transformFunc: string;
-  moveRightPredicate: (x: number, y: number) => boolean;
+  moveRightPredicate: MovePredicate;
   simpleView: boolean;
   showFactored: boolean;
   rowShift: number;
@@ -116,7 +117,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   }, [transformFunc]);
 
   // Create the transform function from string
-  const activeTransform = useMemo(() => {
+  const activeTransform = useMemo<TransformFunction>(() => {
     return createTransformFunction(transformFunc);
   }, [transformFunc]);
 
@@ -147,12 +148,35 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return gx;
   }, [rowShift, randomizeShift, getRowShiftMagnitude]);
 
+  const computeBigGcd = useCallback((gx: number, gy: number): bigint | null => {
+    if (!moveRightPredicate.isDefaultCoprimeRule) return null;
+    if (!activeTransform.evalBigInt) return null;
+
+    const xInt = Math.round(getEffectiveX(gx, gy));
+    const yInt = Math.round(gy);
+
+    const xBig = BigInt(xInt);
+    const yBig = BigInt(yInt);
+
+    const vXBig = activeTransform.evalBigInt(xBig);
+    const vYBig = activeTransform.evalBigInt(yBig);
+    if (vXBig === null || vYBig === null) return null;
+
+    return gcdBigInt(vXBig, vYBig);
+  }, [activeTransform, getEffectiveX, moveRightPredicate.isDefaultCoprimeRule]);
+
   // Offset helper used to keep custom start nodes aligned with row shifts
   // Logic helper: Determine direction based on Coprime rule + Row Shift
   const checkGoesNorth = useCallback((gx: number, gy: number) => {
     const effectiveX = getEffectiveX(gx, gy);
-    
-    // Apply Transform
+
+    // Try BigInt-precise path for the default coprime rule.
+    const gcdExact = computeBigGcd(gx, gy);
+    if (gcdExact !== null) {
+      return gcdExact !== 1n;
+    }
+
+    // Apply Transform (Number path)
     const vX = Math.round(activeTransform(effectiveX));
     const vY = Math.round(activeTransform(gy));
     
@@ -163,7 +187,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     } catch {
       return gcd(vX, vY) !== 1;
     }
-  }, [activeTransform, getEffectiveX, moveRightPredicate]);
+  }, [activeTransform, computeBigGcd, getEffectiveX, moveRightPredicate]);
 
   // Helper to trace a path forward from a given point
   const traceForward = useCallback((startX: number, startY: number) => {
@@ -277,6 +301,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       for (let gy = minY; gy <= maxY; gy += skipFactor) {
         const { x: screenX, y: screenY } = toScreen(gx, gy);
         
+        const gcdExact = computeBigGcd(gx, gy);
+
         // Calculate display value
         const effectiveX = getEffectiveX(gx, gy);
         const valX = activeTransform(effectiveX);
@@ -284,28 +310,39 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const vX = Math.round(valX);
         const vY = Math.round(valY);
         
-        const goesNorth = checkGoesNorth(gx, gy);
+        const goesNorth = gcdExact !== null ? gcdExact !== 1n : checkGoesNorth(gx, gy);
         
-        const displayVal = gcd(vX, vY);
+        const displayVal = gcdExact !== null
+          ? (gcdExact <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(gcdExact) : Number.MAX_SAFE_INTEGER)
+          : gcd(vX, vY);
+
+        const bigLabel = gcdExact !== null && gcdExact > BigInt(Number.MAX_SAFE_INTEGER)
+          ? gcdExact.toString()
+          : null;
         
         // Visibility Logic
         // 1. Hide 1s always (unless origin)
-        let hideNode = (displayVal === 1);
+        let hideNode = gcdExact !== null ? gcdExact === 1n : (displayVal === 1);
 
         // 2. Simple View Logic with Degree
         if (simpleView && !hideNode) {
-            const k = getPrimeFactorCount(displayVal);
+          const valForSimple = bigLabel ? null : displayVal;
+          if (valForSimple === null || valForSimple <= 1) {
+            hideNode = true;
+          } else {
+            const k = getPrimeFactorCount(valForSimple);
             if (k !== degree) {
-                hideNode = true;
+              hideNode = true;
             } else {
-                // Check if val matches the transformed value of X or Y
-                // This implies divisibility: displayVal == |vX| means vX divides vY or vice versa in terms of GCD structure
-                const absVX = Math.abs(vX);
-                const absVY = Math.abs(vY);
-                if (displayVal !== absVX && displayVal !== absVY) {
-                     hideNode = true;
-                }
+              // Check if val matches the transformed value of X or Y
+              // This implies divisibility: displayVal == |vX| means vX divides vY or vice versa in terms of GCD structure
+              const absVX = Math.abs(vX);
+              const absVY = Math.abs(vY);
+              if (valForSimple !== absVX && valForSimple !== absVY) {
+                 hideNode = true;
+              }
             }
+          }
         }
         
         // Always show origin
@@ -351,8 +388,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
               ? colors.origin
               : (displayVal === 1 ? colors.nodeCoprime : colors.nodeFactor);
 
-            if (displayVal > 1) {
-                const label = showFactored ? formatValue(displayVal) : displayVal.toString();
+            if (bigLabel || displayVal > 1) {
+                const label = bigLabel
+                  ? bigLabel
+                  : showFactored
+                    ? (formatValue(displayVal) || displayVal.toString())
+                    : displayVal.toString();
                 if (label) {
                     ctx.fillStyle = getContrastingTextColor(nodeBgColor);
                     const fontSize = Math.min(nodeSize * 0.4, 16);

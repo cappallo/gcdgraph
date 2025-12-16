@@ -1,11 +1,41 @@
-// Greatest Common Divisor
-export const gcd = (a: number, b: number): number => {
-  a = Math.abs(a);
-  b = Math.abs(b);
-  while (b) {
-    [a, b] = [b, a % b];
+// Greatest Common Divisor (uses BigInt when inputs exceed safe integer range)
+export const gcdBigInt = (a: bigint, b: bigint): bigint => {
+  let x = a < 0n ? -a : a;
+  let y = b < 0n ? -b : b;
+  while (y !== 0n) {
+    const r = x % y;
+    x = y;
+    y = r;
   }
-  return a;
+  return x;
+};
+
+export const gcd = (a: number, b: number): number => {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return NaN;
+
+  const absA = Math.abs(Math.round(a));
+  const absB = Math.abs(Math.round(b));
+
+  // Small values stay in Number space for speed.
+  if (absA <= Number.MAX_SAFE_INTEGER && absB <= Number.MAX_SAFE_INTEGER) {
+    let x = absA;
+    let y = absB;
+    while (y !== 0) {
+      const r = x % y;
+      x = y;
+      y = r;
+    }
+    return x;
+  }
+
+  // Fall back to BigInt for large magnitudes to avoid precision loss.
+  const bigA = BigInt(Math.trunc(absA));
+  const bigB = BigInt(Math.trunc(absB));
+  const g = gcdBigInt(bigA, bigB);
+
+  // If the exact gcd fits safely, return the precise number; otherwise return the closest Number.
+  if (g <= BigInt(Number.MAX_SAFE_INTEGER)) return Number(g);
+  return Number(g);
 };
 
 // Get smallest prime factor
@@ -147,10 +177,14 @@ export const getPartitionColor = (n: number): string => {
   return `hsl(${hue}, 85%, 45%)`;
 };
 
+export type TransformFunction = ((x: number) => number) & {
+  evalBigInt?: (x: bigint) => bigint | null;
+};
+
 // Create a safe transform function from a string expression like "2x+1" without using eval/Function
 export const createTransformFunction = (
   expression: string
-): ((x: number) => number) => {
+): TransformFunction => {
   if (!expression || !expression.trim()) return (x) => x;
 
   // Tokenize the input into numbers, operators, variables, and parentheses
@@ -403,6 +437,65 @@ export const createTransformFunction = (
     return stack[0];
   };
 
+  const evalRpnBigInt = (rpn: Token[], x: bigint): bigint | null => {
+    const stack: bigint[] = [];
+    for (const tok of rpn) {
+      if (tok.type === "num") {
+        if (!Number.isInteger(tok.value)) return null;
+        stack.push(BigInt(tok.value));
+      } else if (tok.type === "var") {
+        stack.push(x);
+      } else if (tok.type === "op") {
+        if (tok.value === "neg") {
+          if (stack.length < 1) return null;
+          const a = stack.pop()!;
+          stack.push(-a);
+          continue;
+        }
+        if (stack.length < 2) return null;
+        const b = stack.pop()!;
+        const a = stack.pop()!;
+        switch (tok.value) {
+          case "+":
+            stack.push(a + b);
+            break;
+          case "-":
+            stack.push(a - b);
+            break;
+          case "*":
+            stack.push(a * b);
+            break;
+          case "/":
+            if (b === 0n) return null;
+            if (a % b !== 0n) return null; // refuse non-integer division
+            stack.push(a / b);
+            break;
+          case "^": {
+            if (b < 0n) return null;
+            const exp = Number(b);
+            if (!Number.isFinite(exp) || exp > 4096) return null; // avoid runaway
+            let result = 1n;
+            let base = a;
+            let e = b;
+            while (e > 0n) {
+              if (e & 1n) result *= base;
+              e >>= 1n;
+              if (e > 0n) base *= base;
+            }
+            stack.push(result);
+            break;
+          }
+          default:
+            return null;
+        }
+      } else if (tok.type === "func") {
+        return null; // unsupported in bigint mode
+      }
+    }
+    if (stack.length !== 1) return null;
+    return stack[0];
+  };
+
   const addImplicitMultiplication = (tokens: Token[]): Token[] => {
     const result: Token[] = [];
 
@@ -437,13 +530,33 @@ export const createTransformFunction = (
   };
 
   const tokens = tokenize(expression.replace(/\s+/g, ""));
-  if (!tokens) return (x) => x;
-  const rpn = toRpn(addImplicitMultiplication(tokens));
-  if (!rpn) return (x) => x;
+  if (!tokens) {
+    const fallback = ((x: number) => x) as TransformFunction;
+    return fallback;
+  }
 
-  // Return an evaluator that works without eval/Function
-  return (x: number) => {
+  const rpn = toRpn(addImplicitMultiplication(tokens));
+  if (!rpn) {
+    const fallback = ((x: number) => x) as TransformFunction;
+    return fallback;
+  }
+
+  const supportsBigInt = tokens.every((t) => {
+    if (t.type === "func") return false;
+    if (t.type === "num") return Number.isInteger(t.value);
+    if (t.type === "op") return true;
+    if (t.type === "var") return true;
+    return true;
+  });
+
+  const fn = ((x: number) => {
     const val = evalRpn(rpn, x);
     return val === null ? x : val;
-  };
+  }) as TransformFunction;
+
+  if (supportsBigInt) {
+    fn.evalBigInt = (x: bigint) => evalRpnBigInt(rpn, x);
+  }
+
+  return fn;
 };

@@ -1,5 +1,9 @@
 import { gcd, getSmallestPrimeFactor } from './math';
 
+export type MovePredicate = ((x: number, y: number) => boolean) & {
+  isDefaultCoprimeRule?: boolean;
+};
+
 export const DEFAULT_MOVE_RIGHT_EXPR = 'gcd(x,y)==1';
 
 type Token =
@@ -456,7 +460,7 @@ const evalBool = (node: BoolNode, x: number, y: number): boolean => {
 
 export const compileMoveRightPredicate = (
   expression: string
-): { fn: (x: number, y: number) => boolean; error: string } => {
+): { fn: MovePredicate; error: string } => {
   const expr = (expression || '').trim();
   const src = expr.length ? expr : DEFAULT_MOVE_RIGHT_EXPR;
 
@@ -465,20 +469,23 @@ export const compileMoveRightPredicate = (
     const parser = new Parser(tokens);
     const ast = parser.parseBoolRoot();
     validateBool(ast);
+    const isDefault = src === DEFAULT_MOVE_RIGHT_EXPR;
+    const predicate: MovePredicate = (x, y) => {
+      try {
+        return !!evalBool(ast, x, y);
+      } catch {
+        return gcd(Math.round(x), Math.round(y)) === 1;
+      }
+    };
+    predicate.isDefaultCoprimeRule = isDefault;
     return {
-      fn: (x, y) => {
-        try {
-          return !!evalBool(ast, x, y);
-        } catch {
-          return gcd(Math.round(x), Math.round(y)) === 1;
-        }
-      },
+      fn: predicate,
       error: ''
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Invalid expression.';
     return {
-      fn: (x, y) => gcd(Math.round(x), Math.round(y)) === 1,
+      fn: ((x: number, y: number) => gcd(Math.round(x), Math.round(y)) === 1) as MovePredicate,
       error: msg
     };
   }
