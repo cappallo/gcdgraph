@@ -12,6 +12,9 @@ interface ControlsProps {
   setTheme: (t: Theme) => void;
   transformFunc: string;
   setTransformFunc: (s: string) => void;
+  moveRightExpr: string;
+  setMoveRightExpr: (s: string) => void;
+  moveRightError?: string;
   simpleView: boolean;
   setSimpleView: (b: boolean) => void;
   showFactored: boolean;
@@ -45,6 +48,9 @@ const Controls: React.FC<ControlsProps> = ({
   setTheme,
   transformFunc,
   setTransformFunc,
+  moveRightExpr,
+  setMoveRightExpr,
+  moveRightError,
   simpleView,
   setSimpleView,
   showFactored,
@@ -72,6 +78,7 @@ const Controls: React.FC<ControlsProps> = ({
 }) => {
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
+  const [moveRightInput, setMoveRightInput] = useState(moveRightExpr);
   const [showSettings, setShowSettings] = useState(true);
   const [autoHighlightInput, setAutoHighlightInput] = useState(autoHighlightExpr);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -83,6 +90,9 @@ const Controls: React.FC<ControlsProps> = ({
   useEffect(() => {
     setFuncInput(transformFunc);
   }, [transformFunc]);
+  useEffect(() => {
+    setMoveRightInput(moveRightExpr);
+  }, [moveRightExpr]);
   useEffect(() => {
     setAutoHighlightInput(autoHighlightExpr);
   }, [autoHighlightExpr]);
@@ -117,6 +127,10 @@ const Controls: React.FC<ControlsProps> = ({
     setTransformFunc(funcInput);
   };
 
+  const commitMoveRight = () => {
+    setMoveRightExpr(moveRightInput);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
         commitFunc();
@@ -131,6 +145,13 @@ const Controls: React.FC<ControlsProps> = ({
   const handleAutoHighlightKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       commitAutoHighlight();
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  const handleMoveRightKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      commitMoveRight();
       (e.target as HTMLInputElement).blur();
     }
   };
@@ -228,8 +249,8 @@ const Controls: React.FC<ControlsProps> = ({
               Visualizing the vector field where node <code>(x,y)</code> connects to:
             </p>
             <ul className={`text-xs mt-1 ml-4 list-disc space-y-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                <li><code>(x+1, y)</code> if gcd(f(x),f(y)) = 1 (East)</li>
-                <li><code>(x, y+1)</code> if gcd(f(x),f(y)) ≠ 1 (North)</li>
+                <li><code>(x+1, y)</code> if <code>{moveRightExpr?.trim() || 'gcd(x,y)==1'}</code> (East)</li>
+                <li><code>(x, y+1)</code> otherwise (North)</li>
             </ul>
             
             {/* Transform Input */}
@@ -251,6 +272,26 @@ const Controls: React.FC<ControlsProps> = ({
                         placeholder="e.g. n^2 + 1"
                     />
                 </div>
+            </div>
+
+            {/* Move Right Predicate */}
+            <div className="mt-4">
+              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                Move right when:
+              </label>
+              <input
+                type="text"
+                value={moveRightInput}
+                onChange={(e) => setMoveRightInput(e.target.value)}
+                onBlur={commitMoveRight}
+                onKeyDown={handleMoveRightKeyDown}
+                className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
+                placeholder="e.g. gcd(x+y,y)>1 || lpf(gcd(x,y))==1"
+              />
+              <p className="text-[10px] opacity-60 mt-1">Variables x,y are after transform f(n) + row shift.</p>
+              {moveRightError && (
+                <p className="text-[10px] text-red-400 mt-1">{moveRightError}</p>
+              )}
             </div>
 
             {/* Auto Highlight Input */}

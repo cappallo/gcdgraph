@@ -4,6 +4,7 @@ import Controls from './components/Controls';
 import { Viewport, Theme, Point } from './types';
 import { createTransformFunction } from './utils/math';
 import { getRowOffset, pointKey } from './utils/grid';
+import { compileMoveRightPredicate, DEFAULT_MOVE_RIGHT_EXPR } from './utils/moveRule';
 
 const STORAGE_KEY = 'gcdgraph-settings';
 const DEFAULT_VIEWPORT: Viewport = { x: 12, y: 8, zoom: 45 };
@@ -40,6 +41,7 @@ function App() {
 
   const [theme, setTheme] = useState<Theme>('light');
   const [transformFunc, setTransformFunc] = useState<string>('n');
+  const [moveRightExpr, setMoveRightExpr] = useState<string>(DEFAULT_MOVE_RIGHT_EXPR);
   const [simpleView, setSimpleView] = useState(false);
   const [showFactored, setShowFactored] = useState(true);
   const [rowShift, setRowShift] = useState<number>(0);
@@ -76,6 +78,7 @@ function App() {
       if (data.viewport) setViewport(data.viewport);
       if (data.theme) setTheme(data.theme);
       if (typeof data.transformFunc === 'string') setTransformFunc(data.transformFunc);
+      if (typeof data.moveRightExpr === 'string') setMoveRightExpr(data.moveRightExpr);
       if (typeof data.simpleView === 'boolean') setSimpleView(data.simpleView);
       if (typeof data.showFactored === 'boolean') setShowFactored(data.showFactored);
       if (Number.isFinite(data.rowShift)) setRowShift(clampInt(data.rowShift, 0, 0, 210));
@@ -107,6 +110,7 @@ function App() {
       viewport,
       theme,
       transformFunc,
+      moveRightExpr,
       simpleView,
       showFactored,
       rowShift,
@@ -126,6 +130,7 @@ function App() {
     viewport,
     theme,
     transformFunc,
+    moveRightExpr,
     simpleView,
     showFactored,
     rowShift,
@@ -285,6 +290,8 @@ function App() {
     [backtraceLimit]
   );
 
+  const moveRight = useMemo(() => compileMoveRightPredicate(moveRightExpr), [moveRightExpr]);
+
   return (
     <div
       className={`relative w-full h-full overflow-hidden transition-colors duration-300 select-none ${
@@ -296,6 +303,7 @@ function App() {
         onViewportChange={setViewport}
         theme={theme}
         transformFunc={transformFunc}
+        moveRightPredicate={moveRight.fn}
         simpleView={simpleView}
         showFactored={showFactored}
         rowShift={rowShift}
@@ -316,6 +324,9 @@ function App() {
         setTheme={setTheme}
         transformFunc={transformFunc}
         setTransformFunc={setTransformFunc}
+        moveRightExpr={moveRightExpr}
+        setMoveRightExpr={setMoveRightExpr}
+        moveRightError={moveRight.error}
         simpleView={simpleView}
         setSimpleView={setSimpleView}
         showFactored={showFactored}

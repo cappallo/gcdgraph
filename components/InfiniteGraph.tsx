@@ -8,6 +8,7 @@ interface InfiniteGraphProps {
   onViewportChange: React.Dispatch<React.SetStateAction<Viewport>>;
   theme: Theme;
   transformFunc: string;
+  moveRightPredicate: (x: number, y: number) => boolean;
   simpleView: boolean;
   showFactored: boolean;
   rowShift: number;
@@ -81,6 +82,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   onViewportChange, 
   theme, 
   transformFunc,
+  moveRightPredicate,
   simpleView,
   showFactored,
   rowShift,
@@ -154,10 +156,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const vX = Math.round(activeTransform(effectiveX));
     const vY = Math.round(activeTransform(gy));
     
-    // Rule: Coprime (gcd=1) -> East (return false)
-    //       Not Coprime (gcd!=1) -> North (return true)
-    return gcd(vX, vY) !== 1;
-  }, [activeTransform, getEffectiveX]);
+    // Rule: "move right" predicate -> East (return false)
+    //       otherwise -> North (return true)
+    try {
+      return !moveRightPredicate(vX, vY);
+    } catch {
+      return gcd(vX, vY) !== 1;
+    }
+  }, [activeTransform, getEffectiveX, moveRightPredicate]);
 
   // Helper to trace a path forward from a given point
   const traceForward = useCallback((startX: number, startY: number) => {
