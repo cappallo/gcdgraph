@@ -78,25 +78,58 @@ const getContrastingTextColor = (bgColor: string) => {
   return luminance > 0.55 ? '#111111' : '#ffffff';
 };
 
-// Compactly format large magnitudes to avoid label overflow.
+const trimZeros = (s: string) => s.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+
 const formatNumberCompact = (val: number): string => {
   if (!Number.isFinite(val)) return '';
   const abs = Math.abs(val);
   if (abs === 0) return '0';
   const digits = Math.floor(Math.log10(abs)) + 1;
   if (digits >= 10 || abs >= 1e9) {
-    return val.toExponential(3).replace('+', '');
+    const sign = val < 0 ? '-' : '';
+    let exp = Math.floor(Math.log10(abs));
+    let mantissa = abs / Math.pow(10, exp);
+    mantissa = Number.parseFloat(mantissa.toPrecision(2));
+    if (mantissa >= 10) {
+      mantissa /= 10;
+      exp += 1;
+    }
+    const mantissaStr = trimZeros(mantissa.toPrecision(2));
+    return `${sign}${mantissaStr}e${exp}`;
   }
   return val.toString();
 };
 
+// Round BigInt string to 2 significant figures and emit scientific form.
 const formatBigIntCompact = (raw: string): string => {
-  const clean = raw.replace(/^\+/, '');
-  if (clean.length <= 12) return clean;
-  const exp = clean.length - 1;
-  const leading = Number(clean.slice(0, 3)) / 100;
-  return `${leading.toFixed(2)}e${exp}`;
+  const sign = raw.startsWith('-') ? '-' : '';
+  const digits = raw.replace(/^[-+]/, '');
+  if (digits.length <= 12) return sign + digits;
+
+  const expBase = digits.length - 1;
+  const sig = 2;
+  const sigDigits = digits.slice(0, sig + 1).split('').map((d) => Number(d));
+  let carry = sigDigits.length > sig && sigDigits[sig] >= 5 ? 1 : 0;
+  const kept = sigDigits.slice(0, sig);
+
+  for (let i = kept.length - 1; i >= 0 && carry > 0; i--) {
+    const next = kept[i] + carry;
+    kept[i] = next % 10;
+    carry = Math.floor(next / 10);
+  }
+
+  let exponent = expBase;
+  let mantissaDigits = kept;
+  if (carry > 0) {
+    mantissaDigits = [carry, ...mantissaDigits];
+    exponent += 1;
+  }
+
+  const mantissaStr = mantissaDigits[0] + (mantissaDigits.length > 1 ? `.${mantissaDigits[1]}` : '');
+  return `${sign}${mantissaStr}e${exponent}`;
 };
+
+const labelFont = (size: number) => `bold ${size}px 'SFMono-Regular','Menlo','Consolas','Liberation Mono',monospace`;
 
 const makeLabel = (
   val: number,
@@ -331,7 +364,16 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     // Reduced node size to increase gap
     const nodeSize = Math.max(2, zoom * 0.6); 
 
-    const labels: { text: string; x: number; y: number; color: string; font: string }[] = [];
+    const labels: { text: string; x: number; y: number; color: string; font: string; gKey?: string }[] = [];
+    const labelSeen = new Set<string>();
+
+    const pushLabel = (label: { text: string; x: number; y: number; color: string; font: string; gKey?: string }) => {
+      if (label.gKey) {
+        if (labelSeen.has(label.gKey)) return;
+        labelSeen.add(label.gKey);
+      }
+      labels.push(label);
+    };
 
     for (let gx = minX; gx <= maxX; gx += skipFactor) {
       for (let gy = minY; gy <= maxY; gy += skipFactor) {
@@ -427,22 +469,24 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             const label = makeLabel(displayVal, bigLabel, showFactored);
             if (label) {
                 const fontSize = Math.min(nodeSize * 0.4, 16);
-                labels.push({
+                pushLabel({
                   text: label,
                   x: screenX,
                   y: screenY,
                   color: getContrastingTextColor(nodeBgColor),
-                  font: `bold ${fontSize}px sans-serif`
+                  font: labelFont(fontSize),
+                  gKey: `${gx},${gy}`
                 });
             }
         } else if (gx === 0 && gy === 0) {
             const fontSize = Math.min(nodeSize * 0.4, 16);
-            labels.push({
+            pushLabel({
               text: "0",
               x: screenX,
               y: screenY,
               color: getContrastingTextColor(colors.origin),
-              font: `bold ${fontSize}px sans-serif`
+              font: labelFont(fontSize),
+              gKey: `${gx},${gy}`
             });
         }
       }
@@ -493,13 +537,19 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             for (const p of path.points) {
                 if (p.x < minX - 1 || p.x > maxX + 1 || p.y < minY - 1 || p.y > maxY + 1) continue;
                 
+                const gcdExactPath = computeBigGcd(p.x, p.y);
                 const effectiveX = getEffectiveX(p.x, p.y);
                 const valX = activeTransform(effectiveX);
                 const valY = activeTransform(p.y);
-                const val = gcd(Math.round(valX), Math.round(valY));
-                
+                const val = gcdExactPath !== null
+                  ? (gcdExactPath <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(gcdExactPath) : Number.MAX_SAFE_INTEGER)
+                  : gcd(Math.round(valX), Math.round(valY));
+                const bigLabelPath = gcdExactPath !== null && gcdExactPath > BigInt(Number.MAX_SAFE_INTEGER)
+                  ? gcdExactPath.toString()
+                  : null;
+
                 // Visibility Logic for Paths (apply same rules)
-                let hideNode = (val === 1);
+                let hideNode = gcdExactPath !== null ? gcdExactPath === 1n : (val === 1);
                 
                 if (simpleView && !hideNode) {
                     const k = getPrimeFactorCount(val);
@@ -530,17 +580,20 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                 }
 
                 if (showText && skipFactor === 1) {
-                  const label = (val > 1) ? makeLabel(val, null, showFactored) : "";
-                  if (label) {
-                    const fontSize = Math.min(nodeSize * 0.4, 16);
-                    labels.push({
-                      text: label,
-                      x: s.x,
-                      y: s.y,
-                      color: getContrastingTextColor(path.color),
-                      font: `bold ${fontSize}px sans-serif`
-                    });
-                  }
+                    const label = (gcdExactPath !== null ? gcdExactPath > 1n : val > 1)
+                      ? makeLabel(val, bigLabelPath, showFactored)
+                      : "";
+                    if (label) {
+                        const fontSize = Math.min(nodeSize * 0.4, 16);
+                        pushLabel({
+                          text: label,
+                          x: s.x,
+                          y: s.y,
+                          color: getContrastingTextColor(path.color),
+                          font: labelFont(fontSize),
+                          gKey: `${p.x},${p.y}`
+                        });
+                    }
                 }
             }
         }
@@ -600,17 +653,26 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                     const effectiveX = getEffectiveX(p.x, p.y);
                     const valX = activeTransform(effectiveX);
                     const valY = activeTransform(p.y);
-                    const val = gcd(Math.round(valX), Math.round(valY));
-                    const label = (val > 1) ? makeLabel(val, null, showFactored) : "";
+                    const gcdExactTrace = computeBigGcd(p.x, p.y);
+                    const val = gcdExactTrace !== null
+                      ? (gcdExactTrace <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(gcdExactTrace) : Number.MAX_SAFE_INTEGER)
+                      : gcd(Math.round(valX), Math.round(valY));
+                    const bigLabelTrace = gcdExactTrace !== null && gcdExactTrace > BigInt(Number.MAX_SAFE_INTEGER)
+                      ? gcdExactTrace.toString()
+                      : null;
+                    const label = (gcdExactTrace !== null ? gcdExactTrace > 1n : val > 1)
+                      ? makeLabel(val, bigLabelTrace, showFactored)
+                      : "";
 
                     if (label || (p.x===0 && p.y===0)) {
                         const fontSize = Math.min(nodeSize * 0.4, 16);
-                        labels.push({
+                        pushLabel({
                           text: p.x === 0 && p.y === 0 ? "0" : label,
                           x: s.x,
                           y: s.y,
                           color: '#000000',
-                          font: `bold ${fontSize}px sans-serif`
+                          font: labelFont(fontSize),
+                          gKey: `${p.x},${p.y}`
                         });
                     }
                  }
