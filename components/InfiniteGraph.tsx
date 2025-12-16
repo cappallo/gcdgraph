@@ -78,6 +78,40 @@ const getContrastingTextColor = (bgColor: string) => {
   return luminance > 0.55 ? '#111111' : '#ffffff';
 };
 
+// Compactly format large magnitudes to avoid label overflow.
+const formatNumberCompact = (val: number): string => {
+  if (!Number.isFinite(val)) return '';
+  const abs = Math.abs(val);
+  if (abs === 0) return '0';
+  const digits = Math.floor(Math.log10(abs)) + 1;
+  if (digits >= 10 || abs >= 1e9) {
+    return val.toExponential(3).replace('+', '');
+  }
+  return val.toString();
+};
+
+const formatBigIntCompact = (raw: string): string => {
+  const clean = raw.replace(/^\+/, '');
+  if (clean.length <= 12) return clean;
+  const exp = clean.length - 1;
+  const leading = Number(clean.slice(0, 3)) / 100;
+  return `${leading.toFixed(2)}e${exp}`;
+};
+
+const makeLabel = (
+  val: number,
+  bigLabel: string | null,
+  useFactored: boolean
+): string => {
+  if (bigLabel) return formatBigIntCompact(bigLabel);
+  if (val <= 1) return '';
+  if (useFactored) {
+    const factored = formatValue(val);
+    if (factored && factored.length <= 12) return factored;
+  }
+  return formatNumberCompact(val);
+};
+
 const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ 
   viewport, 
   onViewportChange, 
@@ -297,6 +331,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     // Reduced node size to increase gap
     const nodeSize = Math.max(2, zoom * 0.6); 
 
+    const labels: { text: string; x: number; y: number; color: string; font: string }[] = [];
+
     for (let gx = minX; gx <= maxX; gx += skipFactor) {
       for (let gy = minY; gy <= maxY; gy += skipFactor) {
         const { x: screenX, y: screenY } = toScreen(gx, gy);
@@ -388,27 +424,26 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
               ? colors.origin
               : (displayVal === 1 ? colors.nodeCoprime : colors.nodeFactor);
 
-            if (bigLabel || displayVal > 1) {
-                const label = bigLabel
-                  ? bigLabel
-                  : showFactored
-                    ? (formatValue(displayVal) || displayVal.toString())
-                    : displayVal.toString();
-                if (label) {
-                    ctx.fillStyle = getContrastingTextColor(nodeBgColor);
-                    const fontSize = Math.min(nodeSize * 0.4, 16);
-                    ctx.font = `bold ${fontSize}px sans-serif`;
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(label, screenX, screenY);
-                }
-            } else if (gx === 0 && gy === 0) {
-                 ctx.fillStyle = getContrastingTextColor(nodeBgColor);
-                 ctx.font = `bold ${Math.min(nodeSize * 0.4, 16)}px sans-serif`;
-                 ctx.textAlign = 'center';
-                 ctx.textBaseline = 'middle';
-                 ctx.fillText("0", screenX, screenY);
+            const label = makeLabel(displayVal, bigLabel, showFactored);
+            if (label) {
+                const fontSize = Math.min(nodeSize * 0.4, 16);
+                labels.push({
+                  text: label,
+                  x: screenX,
+                  y: screenY,
+                  color: getContrastingTextColor(nodeBgColor),
+                  font: `bold ${fontSize}px sans-serif`
+                });
             }
+        } else if (gx === 0 && gy === 0) {
+            const fontSize = Math.min(nodeSize * 0.4, 16);
+            labels.push({
+              text: "0",
+              x: screenX,
+              y: screenY,
+              color: getContrastingTextColor(colors.origin),
+              font: `bold ${fontSize}px sans-serif`
+            });
         }
       }
     }
@@ -495,15 +530,17 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                 }
 
                 if (showText && skipFactor === 1) {
-                    const label = (val > 1) ? (showFactored ? formatValue(val) : val.toString()) : "";
-                    if (label) {
-                        ctx.fillStyle = getContrastingTextColor(path.color); 
-                        const fontSize = Math.min(nodeSize * 0.4, 16);
-                        ctx.font = `bold ${fontSize}px sans-serif`;
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.fillText(label, s.x, s.y);
-                    }
+                  const label = (val > 1) ? makeLabel(val, null, showFactored) : "";
+                  if (label) {
+                    const fontSize = Math.min(nodeSize * 0.4, 16);
+                    labels.push({
+                      text: label,
+                      x: s.x,
+                      y: s.y,
+                      color: getContrastingTextColor(path.color),
+                      font: `bold ${fontSize}px sans-serif`
+                    });
+                  }
                 }
             }
         }
@@ -564,23 +601,31 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                     const valX = activeTransform(effectiveX);
                     const valY = activeTransform(p.y);
                     const val = gcd(Math.round(valX), Math.round(valY));
-                    const label = (val > 1) ? (showFactored ? formatValue(val) : val.toString()) : "";
-                    
+                    const label = (val > 1) ? makeLabel(val, null, showFactored) : "";
+
                     if (label || (p.x===0 && p.y===0)) {
-                        ctx.fillStyle = '#000000';
                         const fontSize = Math.min(nodeSize * 0.4, 16);
-                        ctx.font = `bold ${fontSize}px sans-serif`;
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        if (p.x === 0 && p.y === 0) {
-                             ctx.fillText("0", s.x, s.y);
-                        } else {
-                             ctx.fillText(label, s.x, s.y);
-                        }
+                        labels.push({
+                          text: p.x === 0 && p.y === 0 ? "0" : label,
+                          x: s.x,
+                          y: s.y,
+                          color: '#000000',
+                          font: `bold ${fontSize}px sans-serif`
+                        });
                     }
                  }
             }
         }
+    }
+
+    if (labels.length > 0) {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const l of labels) {
+        ctx.fillStyle = l.color;
+        ctx.font = l.font;
+        ctx.fillText(l.text, l.x, l.y);
+      }
     }
 
   }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, rowShift, showFactored, getEffectiveX, degree]);

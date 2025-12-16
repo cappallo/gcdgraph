@@ -197,18 +197,42 @@ export const createTransformFunction = (
     | { type: "rparen" };
 
   const fibCache = new Map<number, number>();
-  const fibonacci = (n: number): number => {
-    n = Math.floor(Math.abs(n));
-    if (n <= 1) return n;
-    if (fibCache.has(n)) return fibCache.get(n)!;
+  const fibBigCache = new Map<bigint, bigint>();
 
-    let a = 0,
-      b = 1;
-    for (let i = 2; i <= n; i++) {
-      [a, b] = [b, a + b];
-    }
-    fibCache.set(n, b);
-    return b;
+  // Fast-doubling Fibonacci on BigInt to avoid precision loss.
+  const fibPair = (n: bigint): [bigint, bigint] => {
+    if (n === 0n) return [0n, 1n];
+    const [a, b] = fibPair(n >> 1n);
+    const c = a * ((b << 1n) - a);
+    const d = a * a + b * b;
+    if (n & 1n) return [d, c + d];
+    return [c, d];
+  };
+
+  const fibonacciBigInt = (n: bigint): bigint => {
+    const absN = n < 0n ? -n : n;
+    const cached = fibBigCache.get(absN);
+    if (cached !== undefined) return cached;
+    const [f] = fibPair(absN);
+    fibBigCache.set(absN, f);
+    return f;
+  };
+
+  const fibonacci = (n: number): number => {
+    const absN = Math.floor(Math.abs(n));
+    const cached = fibCache.get(absN);
+    if (cached !== undefined) return cached;
+    if (absN <= 1) return absN;
+
+    const bigVal = fibonacciBigInt(BigInt(absN));
+    // Return exact value when it fits; otherwise return a lossy Number but keep the
+    // BigInt path available for precise GCD checks.
+    const numVal =
+      bigVal <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number(bigVal)
+        : Number(bigVal);
+    fibCache.set(absN, numVal);
+    return numVal;
   };
 
   const factorialCache = new Map<number, number>();
@@ -489,7 +513,13 @@ export const createTransformFunction = (
             return null;
         }
       } else if (tok.type === "func") {
-        return null; // unsupported in bigint mode
+        if (tok.name === "fib") {
+          if (stack.length < 1) return null;
+          const a = stack.pop()!;
+          stack.push(fibonacciBigInt(a));
+          continue;
+        }
+        return null; // unsupported function in bigint mode
       }
     }
     if (stack.length !== 1) return null;
@@ -541,8 +571,10 @@ export const createTransformFunction = (
     return fallback;
   }
 
+  const bigintFuncs = new Set(["fib"]);
+
   const supportsBigInt = tokens.every((t) => {
-    if (t.type === "func") return false;
+    if (t.type === "func") return bigintFuncs.has(t.name);
     if (t.type === "num") return Number.isInteger(t.value);
     if (t.type === "op") return true;
     if (t.type === "var") return true;
