@@ -1,12 +1,21 @@
-import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import InfiniteGraph from './components/InfiniteGraph';
-import Controls from './components/Controls';
-import { Viewport, Theme, Point } from './types';
-import { createTransformFunction } from './utils/math';
-import { getRowOffset, pointKey } from './utils/grid';
-import { compileMoveRightPredicate, DEFAULT_MOVE_RIGHT_EXPR, MovePredicate } from './utils/moveRule';
+import React, {
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  useRef,
+} from "react";
+import InfiniteGraph from "./components/InfiniteGraph";
+import Controls from "./components/Controls";
+import { Viewport, Theme, Point } from "./types";
+import { createTransformFunction } from "./utils/math";
+import { getRowOffset, pointKey } from "./utils/grid";
+import {
+  compileMoveRightPredicate,
+  DEFAULT_MOVE_RIGHT_EXPR,
+} from "./utils/moveRule";
 
-const STORAGE_KEY = 'gcdgraph-settings';
+const STORAGE_KEY = "gcdgraph-settings";
 const DEFAULT_VIEWPORT: Viewport = { x: 12, y: 8, zoom: 45 };
 const MAX_HIGHLIGHT_POINTS = 500;
 
@@ -39,9 +48,11 @@ function App() {
   // Initial view centered slightly positive to show interesting initial structure
   const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT);
 
-  const [theme, setTheme] = useState<Theme>('light');
-  const [transformFunc, setTransformFunc] = useState<string>('n');
-  const [moveRightExpr, setMoveRightExpr] = useState<string>(DEFAULT_MOVE_RIGHT_EXPR);
+  const [theme, setTheme] = useState<Theme>("light");
+  const [transformFunc, setTransformFunc] = useState<string>("n");
+  const [moveRightExpr, setMoveRightExpr] = useState<string>(
+    DEFAULT_MOVE_RIGHT_EXPR
+  );
   const [simpleView, setSimpleView] = useState(false);
   const [showFactored, setShowFactored] = useState(true);
   const [rowShift, setRowShift] = useState<number>(0);
@@ -51,8 +62,13 @@ function App() {
   const [degree, setDegree] = useState<number>(1);
   const [resetPathsSignal, setResetPathsSignal] = useState<number>(0);
 
-  const [autoHighlightExpr, setAutoHighlightExpr] = useState<string>('');
-  const [autoHighlightRange, setAutoHighlightRange] = useState<HighlightRange>({ min: 1, max: 25 });
+  const [autoHighlightExpr, setAutoHighlightExpr] = useState<string>("");
+  const [autoHighlightEnabled, setAutoHighlightEnabled] =
+    useState<boolean>(false);
+  const [autoHighlightRange, setAutoHighlightRange] = useState<HighlightRange>({
+    min: 1,
+    max: 25,
+  });
   const [pathStepLimit, setPathStepLimit] = useState<number>(5000);
   const [backtraceLimit, setBacktraceLimit] = useState<number>(4000);
   const [backtrailLength, setBacktrailLength] = useState<number | null>(null);
@@ -63,7 +79,7 @@ function App() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const prevRowShiftConfig = useRef<{ k: number; randomize: boolean }>({
     k: rowShift,
-    randomize: randomizeShift
+    randomize: randomizeShift,
   });
 
   // Load persisted settings
@@ -77,27 +93,40 @@ function App() {
       const data = JSON.parse(raw);
       if (data.viewport) setViewport(data.viewport);
       if (data.theme) setTheme(data.theme);
-      if (typeof data.transformFunc === 'string') setTransformFunc(data.transformFunc);
-      if (typeof data.moveRightExpr === 'string') setMoveRightExpr(data.moveRightExpr);
-      if (typeof data.simpleView === 'boolean') setSimpleView(data.simpleView);
-      if (typeof data.showFactored === 'boolean') setShowFactored(data.showFactored);
-      if (Number.isFinite(data.rowShift)) setRowShift(clampInt(data.rowShift, 0, 0, 210));
-      if (typeof data.shiftLock === 'boolean') setShiftLock(data.shiftLock);
-      if (typeof data.randomizeShift === 'boolean') setRandomizeShift(data.randomizeShift);
-      if (Number.isFinite(data.degree)) setDegree(clampInt(data.degree, 1, 1, 4));
-      if (typeof data.autoHighlightExpr === 'string') setAutoHighlightExpr(data.autoHighlightExpr);
+      if (typeof data.transformFunc === "string")
+        setTransformFunc(data.transformFunc);
+      if (typeof data.moveRightExpr === "string")
+        setMoveRightExpr(data.moveRightExpr);
+      if (typeof data.simpleView === "boolean") setSimpleView(data.simpleView);
+      if (typeof data.showFactored === "boolean")
+        setShowFactored(data.showFactored);
+      if (Number.isFinite(data.rowShift))
+        setRowShift(clampInt(data.rowShift, 0, 0, 210));
+      if (typeof data.shiftLock === "boolean") setShiftLock(data.shiftLock);
+      if (typeof data.randomizeShift === "boolean")
+        setRandomizeShift(data.randomizeShift);
+      if (Number.isFinite(data.degree))
+        setDegree(clampInt(data.degree, 1, 1, 4));
+      if (typeof data.autoHighlightExpr === "string")
+        setAutoHighlightExpr(data.autoHighlightExpr);
+      if (typeof data.autoHighlightEnabled === "boolean")
+        setAutoHighlightEnabled(data.autoHighlightEnabled);
       if (data.autoHighlightRange) {
         setAutoHighlightRange({
           min: clampInt(data.autoHighlightRange.min, 1, -2000, 2000),
-          max: clampInt(data.autoHighlightRange.max, 25, -2000, 2000)
+          max: clampInt(data.autoHighlightRange.max, 25, -2000, 2000),
         });
       }
-      if (Number.isFinite(data.pathStepLimit)) setPathStepLimit(clampInt(data.pathStepLimit, 5000, 10, 50000));
-      if (Number.isFinite(data.backtraceLimit)) setBacktraceLimit(clampInt(data.backtraceLimit, 4000, 10, 50000));
-      if (Array.isArray(data.manualNodes)) setManualNodes(dedupePoints(data.manualNodes));
-      if (Array.isArray(data.autoGeneratedNodes)) setAutoGeneratedNodes(dedupePoints(data.autoGeneratedNodes));
+      if (Number.isFinite(data.pathStepLimit))
+        setPathStepLimit(clampInt(data.pathStepLimit, 5000, 10, 50000));
+      if (Number.isFinite(data.backtraceLimit))
+        setBacktraceLimit(clampInt(data.backtraceLimit, 4000, 10, 50000));
+      if (Array.isArray(data.manualNodes))
+        setManualNodes(dedupePoints(data.manualNodes));
+      if (Array.isArray(data.autoGeneratedNodes))
+        setAutoGeneratedNodes(dedupePoints(data.autoGeneratedNodes));
     } catch (err) {
-      console.error('Failed to load settings', err);
+      console.error("Failed to load settings", err);
     } finally {
       setSettingsLoaded(true);
     }
@@ -118,11 +147,12 @@ function App() {
       randomizeShift,
       degree,
       autoHighlightExpr,
+      autoHighlightEnabled,
       autoHighlightRange,
       pathStepLimit,
       backtraceLimit,
       manualNodes,
-      autoGeneratedNodes
+      autoGeneratedNodes,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }, [
@@ -138,17 +168,19 @@ function App() {
     randomizeShift,
     degree,
     autoHighlightExpr,
+    autoHighlightEnabled,
     autoHighlightRange,
     pathStepLimit,
     backtraceLimit,
     manualNodes,
-    autoGeneratedNodes
+    autoGeneratedNodes,
   ]);
 
   // Shift manual path starts when unlocked so they follow row adjustments
   useEffect(() => {
     const previous = prevRowShiftConfig.current;
-    const sameConfig = previous.k === rowShift && previous.randomize === randomizeShift;
+    const sameConfig =
+      previous.k === rowShift && previous.randomize === randomizeShift;
 
     if (shiftLock || sameConfig) {
       prevRowShiftConfig.current = { k: rowShift, randomize: randomizeShift };
@@ -161,7 +193,8 @@ function App() {
       let changed = false;
       const next = starts.map((p) => {
         const delta =
-          getRowOffset(p.y, rowShift, randomizeShift) - getRowOffset(p.y, previous.k, previous.randomize);
+          getRowOffset(p.y, rowShift, randomizeShift) -
+          getRowOffset(p.y, previous.k, previous.randomize);
         if (delta === 0) return p;
         changed = true;
         return { ...p, x: p.x + delta };
@@ -178,23 +211,27 @@ function App() {
     const max = clampInt(autoHighlightRange.max, 25, -2000, 2000);
     return {
       min: Math.min(min, max),
-      max: Math.max(min, max)
+      max: Math.max(min, max),
     };
   }, [autoHighlightRange]);
 
   const evaluateAutoExpr = useCallback(
     (expr: string) => {
       const trimmed = expr.trim();
-      if (!trimmed) return { points: [] as Point[], error: '' };
+      if (!trimmed) return { points: [] as Point[], error: "" };
 
       const tupleMatch = trimmed.match(/^\s*\(?\s*(.+)\s*,\s*(.+)\b\s*\)?\s*$/);
       if (!tupleMatch) {
-        return { points: [] as Point[], error: 'Use format (xExpr, yExpr) with comma-separated expressions in n.' };
+        return {
+          points: [] as Point[],
+          error:
+            "Use format (xExpr, yExpr) with comma-separated expressions in n.",
+        };
       }
 
       const xExpr = tupleMatch[1];
       const yExpr = tupleMatch[2];
-      console.log('Evaluating auto highlight expressions:', { xExpr, yExpr });
+      console.log("Evaluating auto highlight expressions:", { xExpr, yExpr });
       const xFn = createTransformFunction(xExpr);
       const yFn = createTransformFunction(yExpr);
 
@@ -202,7 +239,10 @@ function App() {
       const endN = Math.round(sanitizedRange.max);
       const total = endN - startN + 1;
       if (total > MAX_HIGHLIGHT_POINTS) {
-        return { points: [] as Point[], error: `Range too large (max ${MAX_HIGHLIGHT_POINTS} values).` };
+        return {
+          points: [] as Point[],
+          error: `Range too large (max ${MAX_HIGHLIGHT_POINTS} values).`,
+        };
       }
 
       const points: Point[] = [];
@@ -215,7 +255,10 @@ function App() {
         const y = Math.round(yVal);
 
         if (!Number.isFinite(x) || !Number.isFinite(y)) {
-          return { points: [] as Point[], error: 'Expression produced a non-finite value.' };
+          return {
+            points: [] as Point[],
+            error: "Expression produced a non-finite value.",
+          };
         }
 
         const key = pointKey({ x, y });
@@ -225,7 +268,7 @@ function App() {
         }
       }
 
-      return { points, error: '' };
+      return { points, error: "" };
     },
     [sanitizedRange]
   );
@@ -246,10 +289,16 @@ function App() {
   }, []);
 
   const applyAutoHighlight = useCallback(
-    (expr: string) => {
+    (expr: string, enabled: boolean) => {
       const result = evaluateAutoExpr(expr);
       setAutoHighlightExpr(expr);
-      if (result.error || result.points.length === 0) {
+      setAutoHighlightEnabled(enabled);
+
+      if (!enabled || result.error || result.points.length === 0) {
+        const autoKeys = new Set(autoGeneratedNodes.map((p) => pointKey(p)));
+        setManualNodes((prev) =>
+          prev.filter((p) => !autoKeys.has(pointKey(p)))
+        );
         setAutoGeneratedNodes([]);
         return;
       }
@@ -275,27 +324,32 @@ function App() {
       const updated = { ...prev, ...next };
       return {
         min: clampInt(updated.min, 1, -2000, 2000),
-        max: clampInt(updated.max, 25, -2000, 2000)
+        max: clampInt(updated.max, 25, -2000, 2000),
       };
     });
   }, []);
 
   const handlePathStepLimit = useCallback(
-    (val: number) => setPathStepLimit(clampInt(val, pathStepLimit, 1, 10000000)),
+    (val: number) =>
+      setPathStepLimit(clampInt(val, pathStepLimit, 1, 10000000)),
     [pathStepLimit]
   );
 
   const handleBacktraceLimit = useCallback(
-    (val: number) => setBacktraceLimit(clampInt(val, backtraceLimit, 1, 10000000)),
+    (val: number) =>
+      setBacktraceLimit(clampInt(val, backtraceLimit, 1, 10000000)),
     [backtraceLimit]
   );
 
-  const moveRight = useMemo(() => compileMoveRightPredicate(moveRightExpr), [moveRightExpr]);
+  const moveRight = useMemo(
+    () => compileMoveRightPredicate(moveRightExpr),
+    [moveRightExpr]
+  );
 
   return (
     <div
       className={`relative w-full h-full overflow-hidden transition-colors duration-300 select-none ${
-        theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'
+        theme === "dark" ? "bg-gray-900" : "bg-gray-50"
       }`}
     >
       <InfiniteGraph
@@ -342,6 +396,7 @@ function App() {
         setDegree={setDegree}
         onResetPaths={resetPaths}
         autoHighlightExpr={autoHighlightExpr}
+        autoHighlightEnabled={autoHighlightEnabled}
         onApplyAutoHighlight={applyAutoHighlight}
         autoHighlightError={autoHighlightResult.error}
         autoHighlightRange={sanitizedRange}
@@ -354,7 +409,11 @@ function App() {
       />
       {/* Branding / Watermark */}
       <div className="absolute bottom-4 left-4 pointer-events-none opacity-50">
-        <span className={`text-xs font-mono ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
+        <span
+          className={`text-xs font-mono ${
+            theme === "dark" ? "text-gray-600" : "text-gray-400"
+          }`}
+        >
           Infinite GCD Explorer
         </span>
       </div>

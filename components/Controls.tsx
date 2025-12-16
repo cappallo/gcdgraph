@@ -38,7 +38,8 @@ interface ControlsProps {
   setDegree: (n: number) => void;
   onResetPaths: () => void;
   autoHighlightExpr: string;
-  onApplyAutoHighlight: (s: string) => void;
+  autoHighlightEnabled: boolean;
+  onApplyAutoHighlight: (s: string, enabled: boolean) => void;
   autoHighlightError?: string;
   autoHighlightRange: { min: number; max: number };
   setAutoHighlightRange: (range: Partial<{ min: number; max: number }>) => void;
@@ -74,6 +75,7 @@ const Controls: React.FC<ControlsProps> = ({
   setDegree,
   onResetPaths,
   autoHighlightExpr,
+  autoHighlightEnabled,
   onApplyAutoHighlight,
   autoHighlightError,
   autoHighlightRange,
@@ -156,7 +158,11 @@ const Controls: React.FC<ControlsProps> = ({
   };
 
   const commitAutoHighlight = () => {
-    onApplyAutoHighlight(autoHighlightInput);
+    onApplyAutoHighlight(autoHighlightInput, autoHighlightEnabled);
+  };
+
+  const handleAutoHighlightToggle = (enabled: boolean) => {
+    onApplyAutoHighlight(autoHighlightExpr, enabled);
   };
 
   const handleAutoHighlightKeyDown = (e: React.KeyboardEvent) => {
@@ -167,7 +173,7 @@ const Controls: React.FC<ControlsProps> = ({
   };
 
   const handleMoveRightKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       commitMoveRight();
       (e.target as HTMLInputElement).blur();
     }
@@ -332,7 +338,11 @@ const Controls: React.FC<ControlsProps> = ({
 
             {/* Move Right Predicate */}
             <div className="mt-4">
-              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+              <label
+                className={`block text-xs font-medium mb-1 ${
+                  isDark ? "text-gray-400" : "text-gray-500"
+                }`}
+              >
                 Move right when:
               </label>
               <input
@@ -344,9 +354,13 @@ const Controls: React.FC<ControlsProps> = ({
                 className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
                 placeholder="e.g. gcd(x+y,y)>1 || lpf(gcd(x,y))==1"
               />
-              <p className="text-[10px] opacity-60 mt-1">Variables x,y are after transform f(n) + row shift.</p>
+              <p className="text-[10px] opacity-60 mt-1">
+                Variables x,y are after transform f(n) + row shift.
+              </p>
               {moveRightError && (
-                <p className="text-[10px] text-red-400 mt-1">{moveRightError}</p>
+                <p className="text-[10px] text-red-400 mt-1">
+                  {moveRightError}
+                </p>
               )}
             </div>
 
@@ -359,15 +373,24 @@ const Controls: React.FC<ControlsProps> = ({
               >
                 Auto highlight (x(n), y(n)):
               </label>
-              <input
-                type="text"
-                value={autoHighlightInput}
-                onChange={(e) => setAutoHighlightInput(e.target.value)}
-                onBlur={commitAutoHighlight}
-                onKeyDown={handleAutoHighlightKeyDown}
-                className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
-                placeholder="e.g. (2n^3, n^2)"
-              />
+              <div className="flex gap-2 items-center">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-indigo-600 rounded flex-shrink-0"
+                  checked={autoHighlightEnabled}
+                  onChange={(e) => handleAutoHighlightToggle(e.target.checked)}
+                  title="Enable/disable auto-highlight"
+                />
+                <input
+                  type="text"
+                  value={autoHighlightInput}
+                  onChange={(e) => setAutoHighlightInput(e.target.value)}
+                  onBlur={commitAutoHighlight}
+                  onKeyDown={handleAutoHighlightKeyDown}
+                  className={`flex-1 px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
+                  placeholder="e.g. (2n^3, n^2)"
+                />
+              </div>
               <p className="text-[10px] opacity-60 mt-1">
                 Press enter to apply; uses n from the Advanced range.
               </p>
