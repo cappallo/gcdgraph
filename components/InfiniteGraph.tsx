@@ -717,7 +717,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [render]);
 
-  const findPathToLeftmost = (start: Point): Point[] => {
+  const findPathToBottommostRightmost = (start: Point): Point[] => {
     const q: Point[] = [start];
     const parent = new Map<string, Point | null>();
     const startKey = `${start.x},${start.y}`;
@@ -734,9 +734,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const curr = q.shift()!;
         steps++;
 
-        if (curr.x < best.x || (curr.x === best.x && curr.y < best.y)) {
-            best = curr;
-        }
+        // Goal: bottommost-rightmost among reachable predecessors.
+        // In graph coordinates, "bottommost" means smallest y.
+        if (curr.y < best.y || (curr.y === best.y && curr.x > best.x)) best = curr;
 
         // Neighbors that could connect TO curr (west/south)
         const candidates = [
@@ -767,7 +767,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         }
     }
 
-    // Reconstruct path from start to best (leftmost) using parents
+    // Reconstruct path from start to best (bottommost-rightmost) using parents
     const path: Point[] = [];
     let trace: Point | null | undefined = best;
     while (trace) {
@@ -962,7 +962,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       return;
     }
 
-    const path = findPathToLeftmost({ x: gx, y: gy });
+    const path = findPathToBottommostRightmost({ x: gx, y: gy });
     tracedAnchor.current = { x: gx, y: gy };
     setTracedPath(path);
   };
