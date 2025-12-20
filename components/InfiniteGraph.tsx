@@ -24,8 +24,8 @@ interface InfiniteGraphProps {
   onBacktrailChange?: (len: number | null) => void;
 }
 
-// Calculate a readable text color (black/white) against a given background color.
-// Supports hex (#rgb/#rrggbb) and hsl() strings.
+// Calculate a readable text color (light/dark) against a given background color.
+// Supports hex (#rgb/#rrggbb), rgb()/rgba(), hsl()/hsla().
 const getContrastingTextColor = (bgColor: string) => {
   const parseHex = (hex: string) => {
     const clean = hex.replace('#', '');
@@ -44,6 +44,32 @@ const getContrastingTextColor = (bgColor: string) => {
     return null;
   };
 
+  const clamp255 = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+
+  const parseRgbFunc = (c: string) => {
+    // Examples: rgb(255, 0, 0), rgba(255, 0, 0, 0.5)
+    // Also accept percentages: rgb(100%, 0%, 0%)
+    const m = c.match(/rgba?\(\s*([\d.]+%?)\s*,\s*([\d.]+%?)\s*,\s*([\d.]+%?)(?:\s*,\s*[\d.]+%?)?\s*\)/i);
+    if (!m) return null;
+
+    const toByte = (raw: string) => {
+      if (raw.endsWith('%')) {
+        const p = parseFloat(raw.slice(0, -1));
+        if (!Number.isFinite(p)) return null;
+        return clamp255((p / 100) * 255);
+      }
+      const n = parseFloat(raw);
+      if (!Number.isFinite(n)) return null;
+      return clamp255(n);
+    };
+
+    const r = toByte(m[1]);
+    const g = toByte(m[2]);
+    const b = toByte(m[3]);
+    if (r === null || g === null || b === null) return null;
+    return [r, g, b];
+  };
+
   const hslToRgb = (h: number, s: number, l: number) => {
     const a = s * Math.min(l, 1 - l);
     const f = (n: number) => {
@@ -58,7 +84,10 @@ const getContrastingTextColor = (bgColor: string) => {
     if (c.startsWith('#')) {
       return parseHex(c);
     }
-    const hslMatch = c.match(/hsl\(([-\d.]+),\s*([\d.]+)%?,\s*([\d.]+)%?\)/i);
+    if (c.toLowerCase().startsWith('rgb')) {
+      return parseRgbFunc(c);
+    }
+    const hslMatch = c.match(/hsla?\(\s*([-\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%(?:\s*,\s*[\d.]+%?)?\s*\)/i);
     if (hslMatch) {
       const h = parseFloat(hslMatch[1]);
       const s = parseFloat(hslMatch[2]) / 100;
@@ -69,13 +98,21 @@ const getContrastingTextColor = (bgColor: string) => {
   };
 
   const rgb = parseColor(bgColor);
-  if (!rgb) return '#000000';
+  if (!rgb) return '#111111';
 
   const [r, g, b] = rgb.map(v => v / 255);
   const toLinear = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
   const luminance = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
 
-  return luminance > 0.55 ? '#111111' : '#ffffff';
+  // Prefer the text color (light/dark) with the higher WCAG contrast ratio.
+  // Contrast ratio: (L1 + 0.05) / (L2 + 0.05), where L1 >= L2.
+  const contrastRatio = (l1: number, l2: number) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  const blackL = 0; // #000000
+  const whiteL = 1; // #ffffff
+  const blackContrast = contrastRatio(luminance, blackL);
+  const whiteContrast = contrastRatio(luminance, whiteL);
+
+  return blackContrast >= whiteContrast ? '#111111' : '#ffffff';
 };
 
 const trimZeros = (s: string) => s.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
@@ -365,12 +402,21 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const nodeSize = Math.max(2, zoom * 0.6); 
 
     const labels: { text: string; x: number; y: number; color: string; font: string; gKey?: string }[] = [];
-    const labelSeen = new Set<string>();
+    const labelIndexByKey = new Map<string, number>();
 
-    const pushLabel = (label: { text: string; x: number; y: number; color: string; font: string; gKey?: string }) => {
+    const pushLabel = (
+      label: { text: string; x: number; y: number; color: string; font: string; gKey?: string },
+      options?: { overrideExisting?: boolean }
+    ) => {
       if (label.gKey) {
-        if (labelSeen.has(label.gKey)) return;
-        labelSeen.add(label.gKey);
+        const existingIndex = labelIndexByKey.get(label.gKey);
+        if (existingIndex !== undefined) {
+          if (options?.overrideExisting) {
+            labels[existingIndex] = label;
+          }
+          return;
+        }
+        labelIndexByKey.set(label.gKey, labels.length);
       }
       labels.push(label);
     };
@@ -592,7 +638,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                           color: getContrastingTextColor(path.color),
                           font: labelFont(fontSize),
                           gKey: `${p.x},${p.y}`
-                        });
+                        }, { overrideExisting: true });
                     }
                 }
             }

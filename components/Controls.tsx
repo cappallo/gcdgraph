@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Plus,
   Minus,
@@ -9,9 +9,22 @@ import {
   SlidersHorizontal,
   Eraser,
   ChevronDown,
+  Save,
+  FolderOpen,
+  Trash2,
 } from "lucide-react";
 import { Viewport, Theme, Point } from "../types";
 import { formatValue } from "../utils/math";
+
+interface RowShiftBounds {
+  min: number;
+  max: number;
+}
+
+interface SavedSlotSummary {
+  id: string;
+  description: string;
+}
 
 interface ControlsProps {
   viewport: Viewport;
@@ -29,6 +42,8 @@ interface ControlsProps {
   setShowFactored: (b: boolean) => void;
   rowShift: number;
   setRowShift: (n: number) => void;
+  rowShiftBounds: RowShiftBounds;
+  setRowShiftBounds: (range: Partial<RowShiftBounds>) => void;
   shiftLock: boolean;
   setShiftLock: (b: boolean) => void;
   randomizeShift: boolean;
@@ -48,6 +63,10 @@ interface ControlsProps {
   backtraceLimit: number;
   setBacktraceLimit: (n: number) => void;
   backtrailLength: number | null;
+  savedSlots: SavedSlotSummary[];
+  onSaveSlot: (description: string) => void;
+  onLoadSlot: (slotId: string) => void;
+  onDeleteSlot: (slotId: string) => void;
 }
 
 const Controls: React.FC<ControlsProps> = ({
@@ -66,6 +85,8 @@ const Controls: React.FC<ControlsProps> = ({
   setShowFactored,
   rowShift,
   setRowShift,
+  rowShiftBounds,
+  setRowShiftBounds,
   shiftLock,
   setShiftLock,
   randomizeShift,
@@ -85,6 +106,10 @@ const Controls: React.FC<ControlsProps> = ({
   backtraceLimit,
   setBacktraceLimit,
   backtrailLength,
+  savedSlots,
+  onSaveSlot,
+  onLoadSlot,
+  onDeleteSlot,
 }) => {
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
@@ -105,6 +130,17 @@ const Controls: React.FC<ControlsProps> = ({
   const [backtraceLimitInput, setBacktraceLimitInput] = useState(
     backtraceLimit.toString()
   );
+  const [rowShiftMinInput, setRowShiftMinInput] = useState(
+    rowShiftBounds.min.toString()
+  );
+  const [rowShiftMaxInput, setRowShiftMaxInput] = useState(
+    rowShiftBounds.max.toString()
+  );
+  const [showPresetSave, setShowPresetSave] = useState(false);
+  const [showPresetLoad, setShowPresetLoad] = useState(false);
+  const [presetDescription, setPresetDescription] = useState("");
+  const [saveFeedback, setSaveFeedback] = useState("");
+  const saveFeedbackTimer = useRef<number | null>(null);
 
   useEffect(() => {
     setFuncInput(transformFunc);
@@ -125,6 +161,17 @@ const Controls: React.FC<ControlsProps> = ({
   useEffect(() => {
     setBacktraceLimitInput(backtraceLimit.toString());
   }, [backtraceLimit]);
+  useEffect(() => {
+    setRowShiftMinInput(rowShiftBounds.min.toString());
+    setRowShiftMaxInput(rowShiftBounds.max.toString());
+  }, [rowShiftBounds.min, rowShiftBounds.max]);
+  useEffect(() => {
+    return () => {
+      if (saveFeedbackTimer.current !== null) {
+        window.clearTimeout(saveFeedbackTimer.current);
+      }
+    };
+  }, []);
 
   const handleZoomIn = () => {
     setViewport({ ...viewport, zoom: Math.min(viewport.zoom * 1.2, 200) });
@@ -215,6 +262,61 @@ const Controls: React.FC<ControlsProps> = ({
     }
   };
 
+  const commitRowShiftMin = () => {
+    const num = Number(rowShiftMinInput);
+    if (Number.isFinite(num)) {
+      setRowShiftBounds({ min: num });
+    } else {
+      setRowShiftMinInput(rowShiftBounds.min.toString());
+    }
+  };
+
+  const commitRowShiftMax = () => {
+    const num = Number(rowShiftMaxInput);
+    if (Number.isFinite(num)) {
+      setRowShiftBounds({ max: num });
+    } else {
+      setRowShiftMaxInput(rowShiftBounds.max.toString());
+    }
+  };
+
+  const triggerSaveFeedback = () => {
+    setSaveFeedback("Saved.");
+    if (saveFeedbackTimer.current !== null) {
+      window.clearTimeout(saveFeedbackTimer.current);
+    }
+    saveFeedbackTimer.current = window.setTimeout(() => {
+      setSaveFeedback("");
+    }, 1400);
+  };
+
+  const togglePresetSave = () => {
+    setShowPresetSave((prev) => !prev);
+    setShowPresetLoad(false);
+  };
+
+  const togglePresetLoad = () => {
+    setShowPresetLoad((prev) => !prev);
+    setShowPresetSave(false);
+  };
+
+  const handlePresetSave = () => {
+    const trimmed = presetDescription.trim();
+    if (!trimmed) return;
+    onSaveSlot(trimmed);
+    setPresetDescription("");
+    triggerSaveFeedback();
+  };
+
+  const handlePresetLoad = (slotId: string) => {
+    onLoadSlot(slotId);
+    setShowPresetLoad(false);
+  };
+
+  const handlePresetDelete = (slotId: string) => {
+    onDeleteSlot(slotId);
+  };
+
   const isDark = theme === "dark";
   const panelClass = isDark
     ? "bg-gray-800/90 border-gray-700 text-gray-200"
@@ -234,6 +336,14 @@ const Controls: React.FC<ControlsProps> = ({
   const btnClass = isDark
     ? "bg-gray-800 text-gray-200 hover:bg-gray-700 border-gray-700"
     : "bg-white text-gray-700 hover:bg-gray-50 border-gray-200";
+
+  const iconButtonClass = isDark
+    ? "text-gray-300 hover:bg-gray-700/60"
+    : "text-gray-600 hover:bg-gray-100";
+
+  const presetButtonClass = isDark
+    ? "bg-gray-900/70 border-gray-700 text-gray-200 hover:bg-gray-800"
+    : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50";
 
   const inputClass = isDark
     ? "bg-gray-900 border-gray-600 text-gray-200 focus:border-blue-500"
@@ -285,9 +395,29 @@ const Controls: React.FC<ControlsProps> = ({
           <div
             className={`backdrop-blur-sm p-4 rounded-xl shadow-lg border mb-2 max-w-xs pointer-events-auto transition-colors duration-300 ${panelClass}`}
           >
-            <h1 className="font-bold flex items-center gap-2">
-              <Move className="w-4 h-4" /> GCD Vector Graph
-            </h1>
+            <div className="flex items-center justify-between">
+              <h1 className="font-bold flex items-center gap-2">
+                <Move className="w-4 h-4" /> GCD Vector Graph
+              </h1>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={togglePresetSave}
+                  className={`p-1 rounded-md transition-colors ${iconButtonClass}`}
+                  title="Save settings preset"
+                >
+                  <Save className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={togglePresetLoad}
+                  className={`p-1 rounded-md transition-colors ${iconButtonClass}`}
+                  title="Load settings preset"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
             <p
               className={`text-xs mt-2 leading-relaxed ${
                 isDark ? "text-gray-400" : "text-gray-600"
@@ -309,6 +439,98 @@ const Controls: React.FC<ControlsProps> = ({
                 <code>(x, y+1)</code> otherwise (North)
               </li>
             </ul>
+
+            {showPresetSave && (
+              <div
+                className={`mt-3 rounded-lg border p-2 ${
+                  isDark ? "border-gray-700/80" : "border-gray-200"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <label
+                    className={`block text-[10px] font-medium ${
+                      isDark ? "text-gray-400" : "text-gray-500"
+                    }`}
+                  >
+                    Save current settings
+                  </label>
+                  {saveFeedback && (
+                    <span className="text-[10px] text-emerald-500">
+                      {saveFeedback}
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={presetDescription}
+                    onChange={(e) => setPresetDescription(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        handlePresetSave();
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    className={`flex-1 px-2 py-1 text-xs rounded border outline-none ${inputClass}`}
+                    placeholder="Description"
+                  />
+                  <button
+                    type="button"
+                    onClick={handlePresetSave}
+                    className={`px-2 py-1 text-xs rounded border ${presetButtonClass}`}
+                    disabled={!presetDescription.trim()}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {showPresetLoad && (
+              <div
+                className={`mt-3 rounded-lg border p-2 ${
+                  isDark ? "border-gray-700/80" : "border-gray-200"
+                }`}
+              >
+                <p
+                  className={`text-[10px] font-medium mb-1 ${
+                    isDark ? "text-gray-400" : "text-gray-500"
+                  }`}
+                >
+                  Load saved preset
+                </p>
+                {savedSlots.length === 0 ? (
+                  <p className="text-[10px] opacity-60">No presets yet.</p>
+                ) : (
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {savedSlots.map((slot) => (
+                      <div key={slot.id} className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handlePresetLoad(slot.id)}
+                          className={`flex-1 px-2 py-1 text-left text-xs rounded border ${presetButtonClass}`}
+                          title={`Load "${slot.description}"`}
+                        >
+                          <span className="block truncate">
+                            {slot.description}
+                          </span>
+                        </button>
+                        {slot.id !== "default" && (
+                          <button
+                            type="button"
+                            onClick={() => handlePresetDelete(slot.id)}
+                            className={`p-1 rounded border ${presetButtonClass}`}
+                            title={`Delete "${slot.description}"`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Transform Input */}
             <div className="mt-4">
@@ -412,7 +634,9 @@ const Controls: React.FC<ControlsProps> = ({
               </label>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setRowShift(Math.max(0, rowShift - 1))}
+                  onClick={() =>
+                    setRowShift(Math.max(rowShiftBounds.min, rowShift - 1))
+                  }
                   className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${
                     isDark ? "text-gray-300" : "text-gray-600"
                   }`}
@@ -421,15 +645,17 @@ const Controls: React.FC<ControlsProps> = ({
                 </button>
                 <input
                   type="range"
-                  min="0"
-                  max="210"
+                  min={rowShiftBounds.min}
+                  max={rowShiftBounds.max}
                   step="1"
                   value={rowShift}
                   onChange={(e) => setRowShift(parseInt(e.target.value))}
                   className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                 />
                 <button
-                  onClick={() => setRowShift(Math.min(210, rowShift + 1))}
+                  onClick={() =>
+                    setRowShift(Math.min(rowShiftBounds.max, rowShift + 1))
+                  }
                   className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${
                     isDark ? "text-gray-300" : "text-gray-600"
                   }`}
@@ -578,6 +804,45 @@ const Controls: React.FC<ControlsProps> = ({
                     </div>
                     <p className="text-[10px] opacity-60 mt-1">
                       Inclusive range for n when auto-highlighting.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label
+                      className={`block text-xs font-medium mb-1 ${
+                        isDark ? "text-gray-400" : "text-gray-500"
+                      }`}
+                    >
+                      Row shift k bounds
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        value={rowShiftMinInput}
+                        onChange={(e) => setRowShiftMinInput(e.target.value)}
+                        onBlur={commitRowShiftMin}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" && commitRowShiftMin()
+                        }
+                        min="0"
+                        max="210"
+                        className={`w-1/2 px-2 py-1 rounded border ${inputClass} text-sm`}
+                      />
+                      <input
+                        type="number"
+                        value={rowShiftMaxInput}
+                        onChange={(e) => setRowShiftMaxInput(e.target.value)}
+                        onBlur={commitRowShiftMax}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" && commitRowShiftMax()
+                        }
+                        min="0"
+                        max="210"
+                        className={`w-1/2 px-2 py-1 rounded border ${inputClass} text-sm`}
+                      />
+                    </div>
+                    <p className="text-[10px] opacity-60 mt-1">
+                      Slider stays within this range.
                     </p>
                   </div>
 
