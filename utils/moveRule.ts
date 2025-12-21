@@ -56,6 +56,55 @@ const getGreatestPrimeFactor = (n: number): number => {
   return gpf;
 };
 
+const fibCache = new Map<number, number>();
+const fibBigCache = new Map<bigint, bigint>();
+
+// Fast-doubling Fibonacci (BigInt) for exact intermediate computation.
+const fibPair = (n: bigint): [bigint, bigint] => {
+  if (n === 0n) return [0n, 1n];
+  const [a, b] = fibPair(n >> 1n);
+  const c = a * ((b << 1n) - a);
+  const d = a * a + b * b;
+  if (n & 1n) return [d, c + d];
+  return [c, d];
+};
+
+const fibonacciBigInt = (n: bigint): bigint => {
+  const absN = n < 0n ? -n : n;
+  const cached = fibBigCache.get(absN);
+  if (cached !== undefined) return cached;
+  const [f] = fibPair(absN);
+  fibBigCache.set(absN, f);
+  return f;
+};
+
+const fib = (n: number): number => {
+  const absN = Math.floor(Math.abs(n));
+  const cached = fibCache.get(absN);
+  if (cached !== undefined) return cached;
+  if (absN <= 1) return absN;
+  const bigVal = fibonacciBigInt(BigInt(absN));
+  const numVal = bigVal <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(bigVal) : Number(bigVal);
+  fibCache.set(absN, numVal);
+  return numVal;
+};
+
+const factCache = new Map<number, number>();
+const fact = (n: number): number => {
+  const absN = Math.floor(Math.abs(n));
+  if (absN <= 1) return 1;
+  const cached = factCache.get(absN);
+  if (cached !== undefined) return cached;
+
+  let result = 1n;
+  for (let i = 2n; i <= BigInt(absN); i++) {
+    result *= i;
+  }
+  const numResult = Number(result);
+  factCache.set(absN, numResult);
+  return numResult;
+};
+
 const tokenize = (srcRaw: string): Token[] => {
   const src = srcRaw;
   const tokens: Token[] = [];
@@ -343,7 +392,9 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
         floor: Math.floor,
         ceil: Math.ceil,
         round: Math.round,
-        exp: Math.exp
+        exp: Math.exp,
+        fib,
+        fact
       };
 
       if (unaryMath[name]) {
@@ -386,6 +437,8 @@ const validateNum = (node: NumNode): void => {
       node.args.forEach(validateNum);
 
       const unaryMath = new Set(['sin', 'cos', 'tan', 'log', 'sqrt', 'abs', 'floor', 'ceil', 'round', 'exp']);
+      unaryMath.add('fib');
+      unaryMath.add('fact');
       if (unaryMath.has(name)) {
         if (argc !== 1) throw new ParseError(`${name}() takes 1 argument.`);
         return;

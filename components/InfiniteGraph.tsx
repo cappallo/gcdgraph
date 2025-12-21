@@ -225,11 +225,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return createTransformFunction(transformFunc);
   }, [transformFunc]);
 
-  useEffect(() => {
-    setTracedPath(null);
-    tracedAnchor.current = null;
-  }, [transformFunc, rowShift, randomizeShift]);
-
   // External reset for all user-created paths
   useEffect(() => {
     setTracedPath(null);
@@ -292,6 +287,77 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       return gcd(vX, vY) !== 1;
     }
   }, [activeTransform, computeBigGcd, getEffectiveX, moveRightPredicate]);
+
+  const findPathToBottommostRightmost = useCallback((start: Point): Point[] => {
+    const q: Point[] = [start];
+    const parent = new Map<string, Point | null>();
+    const startKey = `${start.x},${start.y}`;
+    parent.set(startKey, null);
+
+    const visited = new Set<string>();
+    visited.add(startKey);
+
+    let steps = 0;
+    const maxSteps = Math.max(1, backtraceLimit);
+    let best = start;
+
+    while (q.length > 0 && steps < maxSteps) {
+      const curr = q.shift()!;
+      steps++;
+
+      // Goal: bottommost-rightmost among reachable predecessors.
+      // In graph coordinates, "bottommost" means smallest y.
+      if (curr.y < best.y || (curr.y === best.y && curr.x > best.x)) best = curr;
+
+      // Neighbors that could connect TO curr (west/south)
+      const candidates = [
+        { x: curr.x - 1, y: curr.y },
+        { x: curr.x, y: curr.y - 1 },
+      ];
+
+      for (const cand of candidates) {
+        const key = `${cand.x},${cand.y}`;
+        if (visited.has(key)) continue;
+
+        // Determine if 'cand' actually points to 'curr'
+        let connects = false;
+        const candGoesNorth = checkGoesNorth(cand.x, cand.y);
+
+        if (cand.x === curr.x - 1 && cand.y === curr.y) {
+          // cand is West. Connects to curr (East) if it does NOT go North.
+          if (!candGoesNorth) connects = true;
+        } else if (cand.x === curr.x && cand.y === curr.y - 1) {
+          // cand is South. Connects to curr (North) if it DOES go North.
+          if (candGoesNorth) connects = true;
+        }
+
+        if (connects) {
+          visited.add(key);
+          parent.set(key, curr);
+          q.push(cand);
+        }
+      }
+    }
+
+    // Reconstruct path from start to best (bottommost-rightmost) using parents
+    const path: Point[] = [];
+    let trace: Point | null | undefined = best;
+    while (trace) {
+      path.push(trace);
+      trace = parent.get(`${trace.x},${trace.y}`);
+    }
+    return path.reverse();
+  }, [backtraceLimit, checkGoesNorth]);
+
+  // If the user changes the move rule / transform / row-shift while a backtrace is visible,
+  // recompute it so it stays consistent with the new evaluation.
+  useEffect(() => {
+    if (!tracedAnchor.current) {
+      setTracedPath(null);
+      return;
+    }
+    setTracedPath(findPathToBottommostRightmost(tracedAnchor.current));
+  }, [findPathToBottommostRightmost, moveRightPredicate, transformFunc, rowShift, randomizeShift]);
 
   // Helper to trace a path forward from a given point
   const traceForward = useCallback((startX: number, startY: number) => {
@@ -434,7 +500,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const vX = Math.round(valX);
         const vY = Math.round(valY);
         
-        const goesNorth = gcdExact !== null ? gcdExact !== 1n : checkGoesNorth(gx, gy);
+        // Always derive direction from the active move rule.
+        // `checkGoesNorth` already uses the BigInt-precise path for the default coprime rule.
+        const goesNorth = checkGoesNorth(gx, gy);
         
         const displayVal = gcdExact !== null
           ? (gcdExact <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(gcdExact) : Number.MAX_SAFE_INTEGER)
@@ -736,7 +804,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, rowShift, showFactored, getEffectiveX, degree]);
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, computeBigGcd, rowShift, showFactored, getEffectiveX, degree]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {
@@ -763,65 +831,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [render]);
 
-  const findPathToBottommostRightmost = (start: Point): Point[] => {
-    const q: Point[] = [start];
-    const parent = new Map<string, Point | null>();
-    const startKey = `${start.x},${start.y}`;
-    parent.set(startKey, null);
-    
-    const visited = new Set<string>();
-    visited.add(startKey);
-
-    let steps = 0;
-    const maxSteps = Math.max(1, backtraceLimit);
-    let best = start;
-
-    while (q.length > 0 && steps < maxSteps) {
-        const curr = q.shift()!;
-        steps++;
-
-        // Goal: bottommost-rightmost among reachable predecessors.
-        // In graph coordinates, "bottommost" means smallest y.
-        if (curr.y < best.y || (curr.y === best.y && curr.x > best.x)) best = curr;
-
-        // Neighbors that could connect TO curr (west/south)
-        const candidates = [
-            { x: curr.x - 1, y: curr.y },
-            { x: curr.x, y: curr.y - 1 }
-        ];
-
-        for (const cand of candidates) {
-            const key = `${cand.x},${cand.y}`;
-            if (visited.has(key)) continue;
-            // Determine if 'cand' actually points to 'curr'
-            let connects = false;
-            const candGoesNorth = checkGoesNorth(cand.x, cand.y);
-
-            if (cand.x === curr.x - 1 && cand.y === curr.y) {
-                // cand is West. Connects to curr (East) if it does NOT go North.
-                if (!candGoesNorth) connects = true;
-            } else if (cand.x === curr.x && cand.y === curr.y - 1) {
-                // cand is South. Connects to curr (North) if it DOES go North.
-                if (candGoesNorth) connects = true;
-            }
-
-            if (connects) {
-                visited.add(key);
-                parent.set(key, curr); 
-                q.push(cand);
-            }
-        }
-    }
-
-    // Reconstruct path from start to best (bottommost-rightmost) using parents
-    const path: Point[] = [];
-    let trace: Point | null | undefined = best;
-    while (trace) {
-        path.push(trace);
-        trace = parent.get(`${trace.x},${trace.y}`);
-    }
-    return path.reverse();
-  };
 
   const performZoom = (scaleFactor: number, centerClientX: number, centerClientY: number) => {
     if (!canvasRef.current) return;

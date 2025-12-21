@@ -575,6 +575,7 @@ const Controls: React.FC<ControlsProps> = ({
                 onKeyDown={handleMoveRightKeyDown}
                 className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
                 placeholder="e.g. gcd(x+y,y)>1 || lpf(gcd(x,y))==1"
+                title="Supports: comparisons (==, !=, <, <=, >, >=), logic (&&, ||, !), +, -, *, /, ^, gcd(a,b), spf(n)/lpf(n), gpf(n), fib(n), fact(n), sin, cos, tan, log, sqrt, abs, floor, ceil, round, exp"
               />
               <p className="text-[10px] opacity-60 mt-1">
                 Variables x,y are after transform f(n) + row shift.
