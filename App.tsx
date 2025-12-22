@@ -639,8 +639,9 @@ function App() {
         let currY = start.y;
 
         const canFastForward =
-          transformFunc.trim().toLowerCase() === "n" ||
-          transformFunc.trim().toLowerCase() === "x";
+          moveRightPredicate.isDefaultCoprimeRule === true &&
+          (transformFunc.trim().toLowerCase() === "n" ||
+            transformFunc.trim().toLowerCase() === "x");
 
         const stepsLimit = Math.max(0, Math.floor(maxSteps));
         let stepsUsed = 0;
@@ -681,8 +682,9 @@ function App() {
         if (target.y < groundY) return target;
 
         const canFastForward =
-          transformFunc.trim().toLowerCase() === "n" ||
-          transformFunc.trim().toLowerCase() === "x";
+          moveRightPredicate.isDefaultCoprimeRule === true &&
+          (transformFunc.trim().toLowerCase() === "n" ||
+            transformFunc.trim().toLowerCase() === "x");
 
         type Outcome = "hit" | "tooLeft" | "tooRight";
 

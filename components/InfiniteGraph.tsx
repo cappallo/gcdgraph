@@ -217,8 +217,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   const tracedAnchor = useRef<Point | null>(null);
   const canFastForward = useMemo(() => {
     const t = transformFunc.trim().toLowerCase();
-    return t === 'n' || t === 'x';
-  }, [transformFunc]);
+    const transformAllowsFastForward = t === 'n' || t === 'x';
+    return Boolean(moveRightPredicate.isDefaultCoprimeRule) && transformAllowsFastForward;
+  }, [moveRightPredicate.isDefaultCoprimeRule, transformFunc]);
 
   // Create the transform function from string
   const activeTransform = useMemo<TransformFunction>(() => {
