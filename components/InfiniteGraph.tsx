@@ -289,9 +289,45 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   }, [activeTransform, computeBigGcd, getEffectiveX, moveRightPredicate]);
 
   const findPathToBottommostRightmost = useCallback((start: Point): Point[] => {
-    // Fast alternative to reverse BFS: search for the rightmost x on row y=2
+    // Fast alternative to reverse BFS: search for the rightmost x on a computed "ground" row
     // whose forward path reaches `start`, then trace forward to reconstruct.
-    const groundY = 2;
+    const traceForwardEnd = (from: Point, maxSteps: number): Point => {
+      let currX = from.x;
+      let currY = from.y;
+
+      const stepsLimit = Math.max(0, Math.floor(maxSteps));
+      let stepsUsed = 0;
+
+      while (stepsUsed < stepsLimit) {
+        const goesNorth = checkGoesNorth(currX, currY);
+        if (goesNorth) {
+          currY += 1;
+          stepsUsed += 1;
+          continue;
+        }
+
+        const p = Math.abs(currY);
+        const canJump = canFastForward && isPrime(p) && p > 1;
+        if (!canJump) {
+          currX += 1;
+          stepsUsed += 1;
+          continue;
+        }
+
+        const effectiveX = getEffectiveX(currX, currY);
+        const rem = ((effectiveX % p) + p) % p;
+        const jump = rem === 0 ? 1 : Math.min(p - rem, stepsLimit - stepsUsed);
+
+        currX += jump;
+        stepsUsed += jump;
+      }
+
+      return { x: currX, y: currY };
+    };
+
+    const groundProbe = traceForwardEnd({ x: 100, y: 0 }, 100);
+    const groundY = groundProbe.y + 1;
+
     if (start.y < groundY) return [start];
 
     type Outcome = 'hit' | 'tooLeft' | 'tooRight';
@@ -394,13 +430,13 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
     const maxX = Math.floor(start.x);
     const minX = maxX - 1_000_000_000;
-    let probe = maxX;
+    let probeX = maxX;
     let step = 1;
-    while (probe > minX && outcomeFromStartX(probe) === 'tooRight') {
-      probe = maxX - step;
+    while (probeX > minX && outcomeFromStartX(probeX) === 'tooRight') {
+      probeX = maxX - step;
       step *= 2;
     }
-    const lowBound = Math.max(minX, probe);
+    const lowBound = Math.max(minX, probeX);
 
     let lo = lowBound;
     let hi = maxX;

@@ -639,10 +639,12 @@ function App() {
         return { x: currX, y: currY };
       };
 
+      const probe = traceForwardEnd({ x: 100, y: 0 }, 100);
+      const groundY = probe.y + 1;
+
       const findBottommostRightmostPredecessor = (target: Point): Point => {
-        // Fast method: search for the rightmost x on row y=2 whose forward path reaches `target`.
+        // Fast method: search for the rightmost x on the computed ground row whose forward path reaches `target`.
         // This avoids exploring the enormous reverse-reachable set.
-        const groundY = 2;
         if (target.y < groundY) return target;
 
         const canFastForward =
