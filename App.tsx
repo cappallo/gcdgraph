@@ -601,50 +601,42 @@ function App() {
         }
       };
 
-      const walkUntilPrimeY = (start: Point, maxSteps: number): Point => {
-        let x = start.x;
-        let y = start.y;
-
-        for (let i = 0; i < maxSteps; i++) {
-          if (isPrime(y)) break;
-          const goesNorth = checkGoesNorth(x, y);
-          if (goesNorth) y += 1;
-          else x += 1;
-        }
-
-        return { x, y };
-      };
-
-      const advanceRightOnRowUntilNorth = (start: Point, maxSteps: number): Point => {
-        let x = start.x;
-        const y = start.y;
-        if (!isPrime(y)) return start;
+      const traceForwardEnd = (start: Point, maxSteps: number): Point => {
+        let currX = start.x;
+        let currY = start.y;
 
         const canFastForward =
           transformFunc.trim().toLowerCase() === "n" ||
           transformFunc.trim().toLowerCase() === "x";
 
+        const stepsLimit = Math.max(0, Math.floor(maxSteps));
         let stepsUsed = 0;
-        while (stepsUsed < maxSteps) {
-          // Stop at the first node on this row whose outgoing edge is North.
-          if (checkGoesNorth(x, y)) break;
 
-          const p = Math.abs(y);
-          const canJump = canFastForward && isPrime(p) && p > 1;
-          if (!canJump) {
-            x += 1;
+        while (stepsUsed < stepsLimit) {
+          const goesNorth = checkGoesNorth(currX, currY);
+          if (goesNorth) {
+            currY += 1;
             stepsUsed += 1;
             continue;
           }
 
-          const effectiveX = getEffectiveX(x, y);
+          const p = Math.abs(currY);
+          const canJump = canFastForward && isPrime(p) && p > 1;
+          if (!canJump) {
+            currX += 1;
+            stepsUsed += 1;
+            continue;
+          }
+
+          const effectiveX = getEffectiveX(currX, currY);
           const rem = ((effectiveX % p) + p) % p;
-          const jump = rem === 0 ? 1 : p - rem;
-          x += jump;
+          const jump = rem === 0 ? 1 : Math.min(p - rem, stepsLimit - stepsUsed);
+
+          currX += jump;
           stepsUsed += jump;
         }
 
-        return { x, y };
+        return { x: currX, y: currY };
       };
 
       const findBottommostRightmostPredecessor = (target: Point): Point => {
@@ -765,9 +757,8 @@ function App() {
           : autoHighlightGoToGround
           ? dedupePoints(
               result.points.map((start) => {
-                const walked = walkUntilPrimeY(start, 1000);
-                const primeRowTarget = advanceRightOnRowUntilNorth(walked, 1000000);
-                return findBottommostRightmostPredecessor(primeRowTarget);
+                const end = traceForwardEnd(start, 1000);
+                return findBottommostRightmostPredecessor(end);
               })
             )
           : result.points;
