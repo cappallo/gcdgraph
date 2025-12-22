@@ -86,6 +86,65 @@ export const isPrime = (n: number): boolean => {
   return getSmallestPrimeFactor(n) === n;
 };
 
+const MAX_NTH_PRIME = 200_000;
+const MAX_PI_N = 3_000_000;
+
+const PRIME_CACHE: number[] = [2];
+
+const isPrimeWithCache = (candidate: number): boolean => {
+  if (candidate === 2) return true;
+  if (candidate < 2 || candidate % 2 === 0) return false;
+  const limit = Math.floor(Math.sqrt(candidate));
+  for (const p of PRIME_CACHE) {
+    if (p > limit) break;
+    if (candidate % p === 0) return false;
+  }
+  return true;
+};
+
+const ensureNthPrime = (n: number): void => {
+  while (PRIME_CACHE.length < n) {
+    let candidate = PRIME_CACHE[PRIME_CACHE.length - 1]! + 1;
+    if (candidate % 2 === 0) candidate++;
+    while (!isPrimeWithCache(candidate)) candidate += 2;
+    PRIME_CACHE.push(candidate);
+  }
+};
+
+const ensurePrimesUpTo = (limit: number): void => {
+  if (limit <= PRIME_CACHE[PRIME_CACHE.length - 1]!) return;
+  while (PRIME_CACHE[PRIME_CACHE.length - 1]! < limit) {
+    ensureNthPrime(PRIME_CACHE.length + 1);
+  }
+};
+
+export const nthPrime = (nRaw: number): number => {
+  if (!Number.isFinite(nRaw)) return NaN;
+  const n = Math.floor(Math.abs(nRaw));
+  if (n < 1) return NaN;
+  if (n > MAX_NTH_PRIME) return NaN;
+  ensureNthPrime(n);
+  return PRIME_CACHE[n - 1]!;
+};
+
+export const primePi = (nRaw: number): number => {
+  if (!Number.isFinite(nRaw)) return NaN;
+  const n = Math.floor(nRaw);
+  if (n < 2) return 0;
+  if (n > MAX_PI_N) return NaN;
+  ensurePrimesUpTo(n);
+
+  // Count primes <= n (upper_bound)
+  let lo = 0;
+  let hi = PRIME_CACHE.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (PRIME_CACHE[mid]! <= n) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+};
+
 // Format GCD string (e.g., prime factorization or simple value)
 // For visual simplicity in the graph, we mostly just return the number,
 // but we could expand to exponential notation like 2^2 * 3 if desired.
@@ -264,6 +323,8 @@ export const createTransformFunction = (
     exp: Math.exp,
     fib: fibonacci,
     fact: factorial,
+    prime: nthPrime,
+    pi: primePi,
   };
 
   const precedence: Record<string, number> = {
@@ -303,7 +364,12 @@ export const createTransformFunction = (
         if (name === "x" || name === "n") {
           tokens.push({ type: "var" });
         } else if (name === "pi") {
-          tokens.push({ type: "num", value: Math.PI });
+          // Allow both constant pi and function pi(n)
+          if (src[j] === "(") {
+            tokens.push({ type: "func", name: "pi" });
+          } else {
+            tokens.push({ type: "num", value: Math.PI });
+          }
         } else if (name === "e") {
           tokens.push({ type: "num", value: Math.E });
         } else if (funcs[name]) {

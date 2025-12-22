@@ -9,6 +9,14 @@ console.log("fib(5):", fibFn(5), "(expected: 5)");
 console.log("fib(10):", fibFn(10), "(expected: 55)");
 console.log("fib(20):", fibFn(20), "(expected: 6765)");
 
+console.log("\nTesting prime/pi functions:");
+const primeFn = createTransformFunction("prime(n)");
+const piFn = createTransformFunction("pi(n)");
+console.log("prime(1):", primeFn(1), "(expected: 2)");
+console.log("prime(6):", primeFn(6), "(expected: 13)");
+console.log("pi(10):", piFn(10), "(expected: 4)");
+console.log("pi(29):", piFn(29), "(expected: 10)");
+
 // Test BigInt powers
 console.log("\nTesting large powers with BigInt:");
 const powerFn = createTransformFunction("2^n+1");

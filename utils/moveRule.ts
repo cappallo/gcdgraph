@@ -1,4 +1,4 @@
-import { gcd, getSmallestPrimeFactor } from './math';
+import { gcd, getSmallestPrimeFactor, nthPrime, primePi } from './math';
 
 export type MovePredicate = ((x: number, y: number) => boolean) & {
   isDefaultCoprimeRule?: boolean;
@@ -181,7 +181,7 @@ const addImplicitMultiplication = (tokens: Token[]): Token[] => {
 
   const canEndFactor = (t: Token) => t.type === 'num' || t.type === 'ident' || t.type === 'rparen';
   const canStartFactor = (t: Token) => t.type === 'num' || t.type === 'ident' || t.type === 'lparen';
-  const isFunctionName = (ident: string) => !['x', 'y', 'pi', 'e', 'true', 'false'].includes(ident);
+  const isFunctionName = (ident: string) => !['x', 'y', 'e', 'true', 'false'].includes(ident);
 
   for (let i = 0; i < tokens.length; i++) {
     const cur = tokens[i];
@@ -211,6 +211,17 @@ class Parser {
     return this.tokens[this.idx++]!;
   }
 
+  private atOp(): Extract<Token, { type: 'op' }> | null {
+    const t = this.at();
+    return t.type === 'op' ? t : null;
+  }
+
+  private eatOp(): Extract<Token, { type: 'op' }> {
+    const t = this.at();
+    if (t.type !== 'op') throw new ParseError('Expected operator.');
+    return this.eat() as Extract<Token, { type: 'op' }>;
+  }
+
   private expect(type: Token['type'], value?: string) {
     const t = this.at();
     if (t.type !== type) throw new ParseError(`Expected ${type}.`);
@@ -226,8 +237,8 @@ class Parser {
 
   private parseOr(): BoolNode {
     let left = this.parseAnd();
-    while (this.at().type === 'op' && this.at().value === '||') {
-      this.eat();
+    while (this.atOp()?.value === '||') {
+      this.eatOp();
       const right = this.parseAnd();
       left = { kind: 'logic', op: '||', left, right };
     }
@@ -236,8 +247,8 @@ class Parser {
 
   private parseAnd(): BoolNode {
     let left = this.parseUnaryBool();
-    while (this.at().type === 'op' && this.at().value === '&&') {
-      this.eat();
+    while (this.atOp()?.value === '&&') {
+      this.eatOp();
       const right = this.parseUnaryBool();
       left = { kind: 'logic', op: '&&', left, right };
     }
@@ -245,8 +256,8 @@ class Parser {
   }
 
   private parseUnaryBool(): BoolNode {
-    if (this.at().type === 'op' && this.at().value === '!') {
-      this.eat();
+    if (this.atOp()?.value === '!') {
+      this.eatOp();
       return { kind: 'not', expr: this.parseUnaryBool() };
     }
     return this.parseAtomBool();
@@ -270,7 +281,7 @@ class Parser {
     if (opTok.type !== 'op' || !['==', '!=', '<', '<=', '>', '>='].includes(opTok.value)) {
       throw new ParseError("Expected a comparison like 'gcd(x,y)==1'.");
     }
-    const op = this.eat().value as CmpOp;
+    const op = this.eatOp().value as CmpOp;
     const right = this.parseNum();
     return { kind: 'cmp', op, left, right };
   }
@@ -281,8 +292,10 @@ class Parser {
 
   private parseAdd(): NumNode {
     let left = this.parseMul();
-    while (this.at().type === 'op' && (this.at().value === '+' || this.at().value === '-')) {
-      const op = this.eat().value as '+' | '-';
+    while (true) {
+      const opTok = this.atOp();
+      if (!opTok || (opTok.value !== '+' && opTok.value !== '-')) break;
+      const op = this.eatOp().value as '+' | '-';
       const right = this.parseMul();
       left = { kind: 'binary', op, left, right };
     }
@@ -291,8 +304,10 @@ class Parser {
 
   private parseMul(): NumNode {
     let left = this.parsePow();
-    while (this.at().type === 'op' && (this.at().value === '*' || this.at().value === '/')) {
-      const op = this.eat().value as '*' | '/';
+    while (true) {
+      const opTok = this.atOp();
+      if (!opTok || (opTok.value !== '*' && opTok.value !== '/')) break;
+      const op = this.eatOp().value as '*' | '/';
       const right = this.parsePow();
       left = { kind: 'binary', op, left, right };
     }
@@ -301,8 +316,8 @@ class Parser {
 
   private parsePow(): NumNode {
     let left = this.parseUnaryNum();
-    if (this.at().type === 'op' && this.at().value === '^') {
-      this.eat();
+    if (this.atOp()?.value === '^') {
+      this.eatOp();
       const right = this.parsePow();
       left = { kind: 'binary', op: '^', left, right };
     }
@@ -310,8 +325,8 @@ class Parser {
   }
 
   private parseUnaryNum(): NumNode {
-    if (this.at().type === 'op' && this.at().value === '-') {
-      this.eat();
+    if (this.atOp()?.value === '-') {
+      this.eatOp();
       return { kind: 'unary', op: '-', expr: this.parseUnaryNum() };
     }
     return this.parsePrimaryNum();
@@ -327,8 +342,8 @@ class Parser {
       this.eat();
       const name = t.value;
       if (name === 'x' || name === 'y') return { kind: 'var', name };
-      if (name === 'pi') return { kind: 'num', value: Math.PI };
-      if (name === 'e') return { kind: 'num', value: Math.E };
+      if (name === 'pi' && this.at().type !== 'lparen') return { kind: 'num', value: Math.PI };
+      if (name === 'e' && this.at().type !== 'lparen') return { kind: 'num', value: Math.E };
 
       if (this.at().type !== 'lparen') throw new ParseError(`Unknown identifier '${name}'.`);
       this.eat(); // (
@@ -394,7 +409,9 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
         round: Math.round,
         exp: Math.exp,
         fib,
-        fact
+        fact,
+        prime: nthPrime,
+        pi: primePi
       };
 
       if (unaryMath[name]) {
@@ -439,6 +456,8 @@ const validateNum = (node: NumNode): void => {
       const unaryMath = new Set(['sin', 'cos', 'tan', 'log', 'sqrt', 'abs', 'floor', 'ceil', 'round', 'exp']);
       unaryMath.add('fib');
       unaryMath.add('fact');
+      unaryMath.add('prime');
+      unaryMath.add('pi');
       if (unaryMath.has(name)) {
         if (argc !== 1) throw new ParseError(`${name}() takes 1 argument.`);
         return;
