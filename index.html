@@ -4,6 +4,68 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GCD Vector Graph</title>
+    <script>
+      (() => {
+        try {
+          const url = new URL(window.location.href);
+          const params = url.searchParams;
+
+          const shouldReset = params.get('reset') === '1';
+          const safeMode = params.get('safe') === '1';
+          const shouldRestore = params.get('restore') === '1';
+
+          const SETTINGS_KEY = 'gcdgraph-settings';
+          const SLOTS_KEY = 'gcdgraph-settings-slots';
+          const SETTINGS_BAK = 'gcdgraph-settings-backup';
+          const SLOTS_BAK = 'gcdgraph-settings-slots-backup';
+
+          if (safeMode) {
+            // Capture a one-time backup so safe mode can never destroy settings.
+            try {
+              if (localStorage.getItem(SETTINGS_BAK) == null) {
+                const cur = localStorage.getItem(SETTINGS_KEY);
+                if (cur != null) localStorage.setItem(SETTINGS_BAK, cur);
+              }
+              if (localStorage.getItem(SLOTS_BAK) == null) {
+                const cur = localStorage.getItem(SLOTS_KEY);
+                if (cur != null) localStorage.setItem(SLOTS_BAK, cur);
+              }
+            } catch {}
+          }
+
+          if (shouldRestore) {
+            try {
+              const bak = localStorage.getItem(SETTINGS_BAK);
+              if (bak != null) localStorage.setItem(SETTINGS_KEY, bak);
+              const slotsBak = localStorage.getItem(SLOTS_BAK);
+              if (slotsBak != null) localStorage.setItem(SLOTS_KEY, slotsBak);
+            } catch {}
+          }
+
+          if (safeMode) {
+            window.__GCDGRAPH_SAFE_MODE__ = true;
+          }
+
+          if (shouldReset) {
+            // Only clear this app's keys.
+            try {
+              localStorage.removeItem(SETTINGS_KEY);
+              localStorage.removeItem(SLOTS_KEY);
+            } catch {}
+          }
+
+          if (shouldReset || safeMode || shouldRestore) {
+            params.delete('reset');
+            params.delete('safe');
+            params.delete('restore');
+            url.search = params.toString();
+            window.history.replaceState({}, document.title, url.toString());
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #f3f4f6; }

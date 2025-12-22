@@ -89,33 +89,52 @@ export const isPrime = (n: number): boolean => {
 const MAX_NTH_PRIME = 200_000;
 const MAX_PI_N = 3_000_000;
 
-const PRIME_CACHE: number[] = [2];
+let SIEVE_MAX = 1;
+let SIEVE_IS_COMPOSITE = new Uint8Array(2);
+let SIEVE_PI_PREFIX = new Uint32Array(2);
+let SIEVE_PRIMES: number[] = [];
 
-const isPrimeWithCache = (candidate: number): boolean => {
-  if (candidate === 2) return true;
-  if (candidate < 2 || candidate % 2 === 0) return false;
-  const limit = Math.floor(Math.sqrt(candidate));
-  for (const p of PRIME_CACHE) {
-    if (p > limit) break;
-    if (candidate % p === 0) return false;
+const buildSieveUpTo = (limit: number): void => {
+  const n = Math.max(1, Math.floor(limit));
+  const isComposite = new Uint8Array(n + 1);
+  if (n >= 0) isComposite[0] = 1;
+  if (n >= 1) isComposite[1] = 1;
+
+  for (let p = 2; p * p <= n; p++) {
+    if (isComposite[p]) continue;
+    for (let m = p * p; m <= n; m += p) isComposite[m] = 1;
   }
-  return true;
+
+  const primes: number[] = [];
+  const piPrefix = new Uint32Array(n + 1);
+  let count = 0;
+  for (let i = 2; i <= n; i++) {
+    if (!isComposite[i]) {
+      primes.push(i);
+      count++;
+    }
+    piPrefix[i] = count;
+  }
+
+  SIEVE_MAX = n;
+  SIEVE_IS_COMPOSITE = isComposite;
+  SIEVE_PI_PREFIX = piPrefix;
+  SIEVE_PRIMES = primes;
 };
 
-const ensureNthPrime = (n: number): void => {
-  while (PRIME_CACHE.length < n) {
-    let candidate = PRIME_CACHE[PRIME_CACHE.length - 1]! + 1;
-    if (candidate % 2 === 0) candidate++;
-    while (!isPrimeWithCache(candidate)) candidate += 2;
-    PRIME_CACHE.push(candidate);
-  }
+const ensureSieve = (neededMax: number): void => {
+  const want = Math.floor(neededMax);
+  if (want <= SIEVE_MAX) return;
+  const doubled = Math.max(1024, SIEVE_MAX * 2);
+  const target = Math.min(MAX_PI_N, Math.max(want, doubled));
+  buildSieveUpTo(target);
 };
 
-const ensurePrimesUpTo = (limit: number): void => {
-  if (limit <= PRIME_CACHE[PRIME_CACHE.length - 1]!) return;
-  while (PRIME_CACHE[PRIME_CACHE.length - 1]! < limit) {
-    ensureNthPrime(PRIME_CACHE.length + 1);
-  }
+const nthPrimeUpperBound = (n: number): number => {
+  if (n <= 0) return 0;
+  if (n < 6) return 15;
+  const bound = n * (Math.log(n) + Math.log(Math.log(n))) + 3;
+  return Math.ceil(bound);
 };
 
 export const nthPrime = (nRaw: number): number => {
@@ -123,8 +142,11 @@ export const nthPrime = (nRaw: number): number => {
   const n = Math.floor(Math.abs(nRaw));
   if (n < 1) return NaN;
   if (n > MAX_NTH_PRIME) return NaN;
-  ensureNthPrime(n);
-  return PRIME_CACHE[n - 1]!;
+
+  const bound = nthPrimeUpperBound(n);
+  if (!Number.isFinite(bound) || bound > MAX_PI_N) return NaN;
+  ensureSieve(bound);
+  return SIEVE_PRIMES[n - 1]!;
 };
 
 export const primePi = (nRaw: number): number => {
@@ -132,17 +154,8 @@ export const primePi = (nRaw: number): number => {
   const n = Math.floor(nRaw);
   if (n < 2) return 0;
   if (n > MAX_PI_N) return NaN;
-  ensurePrimesUpTo(n);
-
-  // Count primes <= n (upper_bound)
-  let lo = 0;
-  let hi = PRIME_CACHE.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (PRIME_CACHE[mid]! <= n) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
+  ensureSieve(n);
+  return SIEVE_PI_PREFIX[n] ?? NaN;
 };
 
 // Format GCD string (e.g., prime factorization or simple value)
