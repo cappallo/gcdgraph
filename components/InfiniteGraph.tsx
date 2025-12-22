@@ -289,65 +289,147 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   }, [activeTransform, computeBigGcd, getEffectiveX, moveRightPredicate]);
 
   const findPathToBottommostRightmost = useCallback((start: Point): Point[] => {
-    const q: Point[] = [start];
-    const parent = new Map<string, Point | null>();
-    const startKey = `${start.x},${start.y}`;
-    parent.set(startKey, null);
+    // Fast alternative to reverse BFS: search for the rightmost x on row y=2
+    // whose forward path reaches `start`, then trace forward to reconstruct.
+    const groundY = 2;
+    if (start.y < groundY) return [start];
 
-    const visited = new Set<string>();
-    visited.add(startKey);
+    type Outcome = 'hit' | 'tooLeft' | 'tooRight';
 
-    let steps = 0;
-    const maxSteps = Math.max(1, backtraceLimit);
-    let best = start;
+    const outcomeFromStartX = (startX: number): Outcome => {
+      let currX = startX;
+      let currY = groundY;
+      let lastXAtTargetRow: number | null = null;
 
-    while (q.length > 0 && steps < maxSteps) {
-      const curr = q.shift()!;
-      steps++;
+      const maxIters = 5_000_000;
+      let iters = 0;
 
-      // Goal: bottommost-rightmost among reachable predecessors.
-      // In graph coordinates, "bottommost" means smallest y.
-      if (curr.y < best.y || (curr.y === best.y && curr.x > best.x)) best = curr;
+      while (iters < maxIters) {
+        if (currX === start.x && currY === start.y) return 'hit';
+        if (currY === start.y) lastXAtTargetRow = currX;
+        if (currY > start.y) break;
+        if (currX > start.x && currY <= start.y) return 'tooRight';
 
-      // Neighbors that could connect TO curr (west/south)
-      const candidates = [
-        { x: curr.x - 1, y: curr.y },
-        { x: curr.x, y: curr.y - 1 },
-      ];
-
-      for (const cand of candidates) {
-        const key = `${cand.x},${cand.y}`;
-        if (visited.has(key)) continue;
-
-        // Determine if 'cand' actually points to 'curr'
-        let connects = false;
-        const candGoesNorth = checkGoesNorth(cand.x, cand.y);
-
-        if (cand.x === curr.x - 1 && cand.y === curr.y) {
-          // cand is West. Connects to curr (East) if it does NOT go North.
-          if (!candGoesNorth) connects = true;
-        } else if (cand.x === curr.x && cand.y === curr.y - 1) {
-          // cand is South. Connects to curr (North) if it DOES go North.
-          if (candGoesNorth) connects = true;
+        const goesNorth = checkGoesNorth(currX, currY);
+        if (goesNorth) {
+          currY += 1;
+          iters += 1;
+          continue;
         }
 
-        if (connects) {
-          visited.add(key);
-          parent.set(key, curr);
-          q.push(cand);
+        const p = Math.abs(currY);
+        const canJump = canFastForward && isPrime(p) && p > 1;
+        if (!canJump) {
+          currX += 1;
+          iters += 1;
+          continue;
         }
+
+        const effectiveX = getEffectiveX(currX, currY);
+        const rem = ((effectiveX % p) + p) % p;
+        const jump = rem === 0 ? 1 : p - rem;
+        const nextX = currX + jump;
+
+        // If we pass through the target on the target row during the jump, we hit.
+        if (currY === start.y && start.x > currX && start.x <= nextX) return 'hit';
+
+        // If we pass x+1 before reaching the target row, we're too far right.
+        if (currY < start.y && start.x + 1 > currX && start.x + 1 <= nextX) return 'tooRight';
+
+        currX = nextX;
+        iters += jump;
       }
+
+      if (lastXAtTargetRow === null) return 'tooLeft';
+      if (lastXAtTargetRow < start.x) return 'tooLeft';
+      if (lastXAtTargetRow > start.x) return 'tooRight';
+      return 'hit';
+    };
+
+    const traceForwardToTarget = (from: Point, target: Point): Point[] | null => {
+      const points: Point[] = [from];
+      let currX = from.x;
+      let currY = from.y;
+      const maxIters = 5_000_000;
+      let iters = 0;
+
+      while (iters < maxIters && currY <= target.y && currX <= target.x + 1) {
+        if (currX === target.x && currY === target.y) return points;
+
+        const goesNorth = checkGoesNorth(currX, currY);
+        if (goesNorth) {
+          currY += 1;
+          points.push({ x: currX, y: currY });
+          iters += 1;
+          continue;
+        }
+
+        const p = Math.abs(currY);
+        const canJump = canFastForward && isPrime(p) && p > 1;
+        if (!canJump) {
+          currX += 1;
+          points.push({ x: currX, y: currY });
+          iters += 1;
+          continue;
+        }
+
+        const effectiveX = getEffectiveX(currX, currY);
+        const rem = ((effectiveX % p) + p) % p;
+        const jump = rem === 0 ? 1 : p - rem;
+        const nextX = currX + jump;
+
+        // If we pass through the target on this row, include it and stop.
+        if (currY === target.y && target.x > currX && target.x <= nextX) {
+          points.push({ x: target.x, y: currY });
+          return points;
+        }
+
+        currX = nextX;
+        points.push({ x: currX, y: currY });
+        iters += jump;
+      }
+
+      return null;
+    };
+
+    const maxX = Math.floor(start.x);
+    const minX = maxX - 1_000_000_000;
+    let probe = maxX;
+    let step = 1;
+    while (probe > minX && outcomeFromStartX(probe) === 'tooRight') {
+      probe = maxX - step;
+      step *= 2;
+    }
+    const lowBound = Math.max(minX, probe);
+
+    let lo = lowBound;
+    let hi = maxX;
+    let bestHit: number | null = null;
+
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const out = outcomeFromStartX(mid);
+      if (out === 'tooLeft') {
+        lo = mid + 1;
+        continue;
+      }
+      if (out === 'tooRight') {
+        hi = mid - 1;
+        continue;
+      }
+      bestHit = mid;
+      lo = mid + 1;
     }
 
-    // Reconstruct path from start to best (bottommost-rightmost) using parents
-    const path: Point[] = [];
-    let trace: Point | null | undefined = best;
-    while (trace) {
-      path.push(trace);
-      trace = parent.get(`${trace.x},${trace.y}`);
-    }
-    return path.reverse();
-  }, [backtraceLimit, checkGoesNorth]);
+    if (bestHit === null) return [start];
+
+    const ground = { x: bestHit, y: groundY };
+    const forward = traceForwardToTarget(ground, start);
+    if (!forward) return [start];
+
+    // UI expects tracedPath[0] === clicked node, and last === chosen ground.
+    return forward.slice().reverse();
+  }, [checkGoesNorth, canFastForward, getEffectiveX]);
 
   // If the user changes the move rule / transform / row-shift while a backtrace is visible,
   // recompute it so it stays consistent with the new evaluation.

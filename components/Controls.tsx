@@ -55,6 +55,8 @@ interface ControlsProps {
   autoHighlightExpr: string;
   autoHighlightEnabled: boolean;
   onApplyAutoHighlight: (s: string, enabled: boolean) => void;
+  autoHighlightGoToGround: boolean;
+  setAutoHighlightGoToGround: (b: boolean) => void;
   autoHighlightError?: string;
   autoHighlightRange: { min: number; max: number };
   setAutoHighlightRange: (range: Partial<{ min: number; max: number }>) => void;
@@ -98,6 +100,8 @@ const Controls: React.FC<ControlsProps> = ({
   autoHighlightExpr,
   autoHighlightEnabled,
   onApplyAutoHighlight,
+  autoHighlightGoToGround,
+  setAutoHighlightGoToGround,
   autoHighlightError,
   autoHighlightRange,
   setAutoHighlightRange,
@@ -614,6 +618,20 @@ const Controls: React.FC<ControlsProps> = ({
                   placeholder="e.g. (2n^3, n^2)"
                 />
               </div>
+
+              <label
+                className={`mt-2 flex items-center gap-2 text-xs font-medium cursor-pointer ${
+                  isDark ? "text-gray-300" : "text-gray-700"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-indigo-600 rounded flex-shrink-0"
+                  checked={autoHighlightGoToGround}
+                  onChange={(e) => setAutoHighlightGoToGround(e.target.checked)}
+                />
+                <span>Go to ground</span>
+              </label>
               <p className="text-[10px] opacity-60 mt-1">
                 Press enter to apply; uses n from the Advanced range.
               </p>
