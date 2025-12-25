@@ -1,4 +1,4 @@
-import { gcd, getSmallestPrimeFactor, nthPrime, primePi } from './math';
+import { gcd, getSmallestPrimeFactor, isPrime, nthPrime, primePi } from './math';
 
 export type MovePredicate = ((x: number, y: number) => boolean) & {
   isDefaultCoprimeRule?: boolean;
@@ -19,7 +19,7 @@ type NumNode =
   | { kind: 'num'; value: number }
   | { kind: 'var'; name: 'x' | 'y' }
   | { kind: 'unary'; op: '-'; expr: NumNode }
-  | { kind: 'binary'; op: '+' | '-' | '*' | '/' | '^'; left: NumNode; right: NumNode }
+  | { kind: 'binary'; op: '+' | '-' | '*' | '/' | '%' | '^'; left: NumNode; right: NumNode }
   | { kind: 'call'; name: string; args: NumNode[] };
 
 type BoolNode =
@@ -129,7 +129,7 @@ const tokenize = (srcRaw: string): Token[] => {
       continue;
     }
 
-    if ('+-*/^<>!'.includes(ch)) {
+    if ('+-*/%^<>!'.includes(ch)) {
       pushOp(ch);
       i++;
       continue;
@@ -306,8 +306,8 @@ class Parser {
     let left = this.parsePow();
     while (true) {
       const opTok = this.atOp();
-      if (!opTok || (opTok.value !== '*' && opTok.value !== '/')) break;
-      const op = this.eatOp().value as '*' | '/';
+      if (!opTok || (opTok.value !== '*' && opTok.value !== '/' && opTok.value !== '%')) break;
+      const op = this.eatOp().value as '*' | '/' | '%';
       const right = this.parsePow();
       left = { kind: 'binary', op, left, right };
     }
@@ -388,6 +388,8 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
           return a * b;
         case '/':
           return b === 0 ? Infinity : a / b;
+        case '%':
+          return b === 0 ? Infinity : a % b;
         case '^':
           return Math.pow(a, b);
       }
@@ -411,7 +413,8 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
         fib,
         fact,
         prime: nthPrime,
-        pi: primePi
+        pi: primePi,
+        isprime: (v) => (isPrime(Math.round(v)) ? 1 : 0)
       };
 
       if (unaryMath[name]) {
@@ -430,6 +433,12 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
       if (name === 'gpf') {
         if (args.length !== 1) throw new ParseError('gpf() takes 1 argument.');
         return getGreatestPrimeFactor(Math.round(args[0]!));
+      }
+      if (name === 'mod') {
+        if (args.length !== 2) throw new ParseError('mod() takes 2 arguments.');
+        const a = args[0]!;
+        const b = args[1]!;
+        return b === 0 ? Infinity : a % b;
       }
 
       throw new ParseError(`Unknown function '${name}()'.`);
@@ -458,6 +467,7 @@ const validateNum = (node: NumNode): void => {
       unaryMath.add('fact');
       unaryMath.add('prime');
       unaryMath.add('pi');
+      unaryMath.add('isprime');
       if (unaryMath.has(name)) {
         if (argc !== 1) throw new ParseError(`${name}() takes 1 argument.`);
         return;
@@ -473,6 +483,10 @@ const validateNum = (node: NumNode): void => {
       }
       if (name === 'gpf') {
         if (argc !== 1) throw new ParseError('gpf() takes 1 argument.');
+        return;
+      }
+      if (name === 'mod') {
+        if (argc !== 2) throw new ParseError('mod() takes 2 arguments.');
         return;
       }
 

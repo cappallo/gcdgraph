@@ -338,6 +338,7 @@ export const createTransformFunction = (
     fact: factorial,
     prime: nthPrime,
     pi: primePi,
+    isprime: (v: number) => (isPrime(v) ? 1 : 0),
   };
 
   const precedence: Record<string, number> = {
@@ -345,6 +346,7 @@ export const createTransformFunction = (
     "-": 1,
     "*": 2,
     "/": 2,
+    "%": 2,
     "^": 3,
     neg: 4, // unary minus
   };
@@ -393,7 +395,7 @@ export const createTransformFunction = (
         i = j;
         continue;
       }
-      if ("+-*/^".includes(ch)) {
+      if ("+-*/%^".includes(ch)) {
         tokens.push({ type: "op", value: ch });
         i++;
         continue;
@@ -502,6 +504,9 @@ export const createTransformFunction = (
           case "/":
             stack.push(b === 0 ? Infinity : a / b);
             break;
+          case "%":
+            stack.push(b === 0 ? Infinity : a % b);
+            break;
           case "^":
             // Use BigInt for integer powers to maintain precision beyond 2^53
             // Note: JavaScript Numbers can't accurately represent integers > 2^53-1,
@@ -573,6 +578,11 @@ export const createTransformFunction = (
             if (a % b !== 0n) return null; // refuse non-integer division
             stack.push(a / b);
             break;
+          case "%": {
+            if (b === 0n) return null;
+            stack.push(a % b);
+            break;
+          }
           case "^": {
             if (b < 0n) return null;
             const exp = Number(b);
