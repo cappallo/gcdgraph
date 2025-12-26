@@ -982,7 +982,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     // Check if it's a mouse right click
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     
-    containerRef.current?.setPointerCapture(e.pointerId);
+    if (e.pointerType === 'mouse') {
+      containerRef.current?.setPointerCapture(e.pointerId);
+    }
     evCache.current.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY });
 
     if (evCache.current.size === 1) {
@@ -1095,22 +1097,40 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
     // Cleanup
     evCache.current.delete(e.pointerId);
-    containerRef.current?.releasePointerCapture(e.pointerId);
+    if (e.pointerType === 'mouse') {
+      containerRef.current?.releasePointerCapture(e.pointerId);
+    }
     
     if (evCache.current.size < 2) {
         prevPinchDiff.current = -1;
     }
-    if (evCache.current.size === 0) {
+
+    if (evCache.current.size === 1) {
+        const point = evCache.current.values().next().value;
+        lastPos.current = { x: point.x, y: point.y };
+        setIsDragging(true);
+        isPinching.current = false;
+    } else if (evCache.current.size === 0) {
         setIsDragging(false);
+        isPinching.current = false;
     }
   };
 
   const handlePointerLeave = (e: React.PointerEvent) => {
     // On leave, we just clean up. We DO NOT trigger taps.
     evCache.current.delete(e.pointerId);
-    containerRef.current?.releasePointerCapture(e.pointerId);
-    if (evCache.current.size === 0) {
+    if (e.pointerType === 'mouse') {
+      containerRef.current?.releasePointerCapture(e.pointerId);
+    }
+
+    if (evCache.current.size === 1) {
+        const point = evCache.current.values().next().value;
+        lastPos.current = { x: point.x, y: point.y };
+        setIsDragging(true);
+        isPinching.current = false;
+    } else if (evCache.current.size === 0) {
         setIsDragging(false);
+        isPinching.current = false;
     }
   };
 
