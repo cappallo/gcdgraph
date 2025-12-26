@@ -688,7 +688,7 @@ function App() {
       const findBottommostRightmostPredecessor = (target: Point): Point => {
         // Fast method: search for the rightmost x on the computed ground row whose forward path reaches `target`.
         // This avoids exploring the enormous reverse-reachable set.
-        if (target.y < groundY) return target;
+        if (target.y <= 1 || target.y < groundY) return target;
 
         const canFastForward =
           moveRightPredicate.isDefaultCoprimeRule === true &&
@@ -803,6 +803,7 @@ function App() {
           : autoHighlightGoToGround
           ? dedupePoints(
               result.points.map((start) => {
+                if (start.y <= 1) return start;
                 const end = traceForwardEnd(start, 1000);
                 return findBottommostRightmostPredecessor(end);
               })

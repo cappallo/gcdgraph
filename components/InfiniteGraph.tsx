@@ -326,6 +326,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       return { x: currX, y: currY };
     };
 
+    if (start.y <= 1) return [start];
+
     const groundProbe = traceForwardEnd({ x: 100, y: 0 }, 100);
     const groundY = groundProbe.y + 1;
 
