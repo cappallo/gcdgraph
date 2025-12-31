@@ -626,7 +626,7 @@ export const createTransformFunction = (
           case "^": {
             if (b < 0n) return null;
             const exp = Number(b);
-            if (!Number.isFinite(exp) || exp > 4096) return null; // avoid runaway
+            if (!Number.isFinite(exp) || exp > 32768) return null; // avoid runaway
             let result = 1n;
             let base = a;
             let e = b;

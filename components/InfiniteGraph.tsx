@@ -168,6 +168,10 @@ const formatBigIntCompact = (raw: string): string => {
 
 const labelFont = (size: number) => `bold ${size}px 'SFMono-Regular','Menlo','Consolas','Liberation Mono',monospace`;
 
+const BIGINT_X_CACHE_LIMIT = 100000;
+const BIGINT_Y_CACHE_LIMIT = 100000;
+const BIGINT_GCD_CACHE_LIMIT = 200000;
+
 const makeLabel = (
   val: number,
   bigLabel: string | null,
@@ -226,6 +230,15 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return createTransformFunction(transformFunc);
   }, [transformFunc]);
 
+  const cacheKey = useMemo(() => {
+    return `${transformFunc}|${rowShift}|${randomizeShift ? 1 : 0}|${moveRightPredicate.isDefaultCoprimeRule ? 1 : 0}`;
+  }, [moveRightPredicate.isDefaultCoprimeRule, randomizeShift, rowShift, transformFunc]);
+
+  const bigIntXCache = useRef<Map<bigint, bigint | null>>(new Map());
+  const bigIntYCache = useRef<Map<bigint, bigint | null>>(new Map());
+  const bigGcdCache = useRef<Map<string, bigint | null>>(new Map());
+  const cacheKeyRef = useRef<string>("");
+
   // External reset for all user-created paths
   useEffect(() => {
     setTracedPath(null);
@@ -249,21 +262,52 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   }, [rowShift, randomizeShift, getRowShiftMagnitude]);
 
   const computeBigGcd = useCallback((gx: number, gy: number): bigint | null => {
+    if (cacheKeyRef.current !== cacheKey) {
+      cacheKeyRef.current = cacheKey;
+      bigIntXCache.current.clear();
+      bigIntYCache.current.clear();
+      bigGcdCache.current.clear();
+    }
     if (!moveRightPredicate.isDefaultCoprimeRule) return null;
-    if (!activeTransform.evalBigInt) return null;
+    const evalBigInt = activeTransform.evalBigInt;
+    if (!evalBigInt) return null;
 
     const xInt = Math.round(getEffectiveX(gx, gy));
     const yInt = Math.round(gy);
 
+    const gcdKey = `${xInt},${yInt}`;
+    const gcdCache = bigGcdCache.current;
+    if (gcdCache.has(gcdKey)) return gcdCache.get(gcdKey)!;
+
     const xBig = BigInt(xInt);
     const yBig = BigInt(yInt);
 
-    const vXBig = activeTransform.evalBigInt(xBig);
-    const vYBig = activeTransform.evalBigInt(yBig);
-    if (vXBig === null || vYBig === null) return null;
+    const getCachedTransform = (
+      cache: Map<bigint, bigint | null>,
+      limit: number,
+      value: bigint
+    ) => {
+      if (cache.has(value)) return cache.get(value)!;
+      if (cache.size >= limit) cache.clear();
+      const computed = evalBigInt(value);
+      cache.set(value, computed);
+      return computed;
+    };
 
-    return gcdBigInt(vXBig, vYBig);
-  }, [activeTransform, getEffectiveX, moveRightPredicate.isDefaultCoprimeRule]);
+    const vXBig = getCachedTransform(bigIntXCache.current, BIGINT_X_CACHE_LIMIT, xBig);
+    const vYBig = getCachedTransform(bigIntYCache.current, BIGINT_Y_CACHE_LIMIT, yBig);
+
+    if (vXBig === null || vYBig === null) {
+      if (gcdCache.size >= BIGINT_GCD_CACHE_LIMIT) gcdCache.clear();
+      gcdCache.set(gcdKey, null);
+      return null;
+    }
+
+    const gcdExact = gcdBigInt(vXBig, vYBig);
+    if (gcdCache.size >= BIGINT_GCD_CACHE_LIMIT) gcdCache.clear();
+    gcdCache.set(gcdKey, gcdExact);
+    return gcdExact;
+  }, [activeTransform, cacheKey, getEffectiveX, moveRightPredicate.isDefaultCoprimeRule]);
 
   // Offset helper used to keep custom start nodes aligned with row shifts
   // Logic helper: Determine direction based on Coprime rule + Row Shift
@@ -616,14 +660,22 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
         // Calculate display value
         const effectiveX = getEffectiveX(gx, gy);
-        const valX = activeTransform(effectiveX);
-        const valY = activeTransform(gy);
-        const vX = Math.round(valX);
-        const vY = Math.round(valY);
+        const needsNumberEval = gcdExact === null || simpleView;
+        const vX = needsNumberEval ? Math.round(activeTransform(effectiveX)) : 0;
+        const vY = needsNumberEval ? Math.round(activeTransform(gy)) : 0;
         
         // Always derive direction from the active move rule.
         // `checkGoesNorth` already uses the BigInt-precise path for the default coprime rule.
-        const goesNorth = checkGoesNorth(gx, gy);
+        let goesNorth: boolean;
+        if (gcdExact !== null) {
+          goesNorth = gcdExact !== 1n;
+        } else {
+          try {
+            goesNorth = !moveRightPredicate(vX, vY);
+          } catch {
+            goesNorth = gcd(vX, vY) !== 1;
+          }
+        }
         
         const displayVal = gcdExact !== null
           ? (gcdExact <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(gcdExact) : Number.MAX_SAFE_INTEGER)
@@ -925,7 +977,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, checkGoesNorth, computeBigGcd, rowShift, showFactored, getEffectiveX, degree]);
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, computeBigGcd, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {
