@@ -116,6 +116,21 @@ const clampInt = (val: number, fallback: number, min: number, max: number) => {
   return Math.min(max, Math.max(min, Math.round(val)));
 };
 
+const parseStoredBoolean = (val: unknown): boolean | undefined => {
+  if (typeof val === "boolean") return val;
+  if (typeof val === "string") {
+    const trimmed = val.trim().toLowerCase();
+    if (trimmed === "true") return true;
+    if (trimmed === "false") return false;
+    return undefined;
+  }
+  if (typeof val === "number") {
+    if (val === 1) return true;
+    if (val === 0) return false;
+  }
+  return undefined;
+};
+
 const resolveRowShiftBounds = (
   next: Partial<RowShiftBounds> | undefined,
   fallback: RowShiftBounds
@@ -266,10 +281,20 @@ function App() {
         setDegree(clampInt(data.degree, 1, 1, 4));
       if (typeof data.autoHighlightExpr === "string")
         setAutoHighlightExpr(data.autoHighlightExpr);
-      if (typeof data.autoHighlightEnabled === "boolean")
-        setAutoHighlightEnabled(data.autoHighlightEnabled);
-      if (typeof (data as any).autoHighlightGoToGround === "boolean")
-        setAutoHighlightGoToGround((data as any).autoHighlightGoToGround);
+
+      const parsedAutoHighlightEnabled = parseStoredBoolean(
+        (data as any).autoHighlightEnabled
+      );
+      if (typeof parsedAutoHighlightEnabled === "boolean") {
+        setAutoHighlightEnabled(parsedAutoHighlightEnabled);
+      }
+
+      const parsedGoToGround = parseStoredBoolean(
+        (data as any).autoHighlightGoToGround
+      );
+      if (typeof parsedGoToGround === "boolean") {
+        setAutoHighlightGoToGround(parsedGoToGround);
+      }
       if (data.autoHighlightRange) {
         setAutoHighlightRange({
           min: clampInt(data.autoHighlightRange.min, 1, -2000, 2000),
@@ -357,14 +382,19 @@ function App() {
     try {
       const data = JSON.parse(raw);
       applySettingsSnapshot(data, { syncRowShift: true });
+
+      // Defer the "loaded" flag to avoid writing defaults back to storage
+      // during the same commit that applies the loaded snapshot.
+      queueMicrotask(() => setSettingsLoaded(true));
+      return;
     } catch (err) {
       console.error("Failed to load settings", err);
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch {}
-    } finally {
-      setSettingsLoaded(true);
     }
+
+    setSettingsLoaded(true);
   }, []);
 
   // Load saved slots
@@ -840,9 +870,10 @@ function App() {
   );
 
   useEffect(() => {
+    if (!settingsLoaded) return;
     if (!autoHighlightEnabled) return;
     applyAutoHighlight(autoHighlightExpr, true);
-  }, [autoHighlightEnabled, autoHighlightExpr, applyAutoHighlight]);
+  }, [settingsLoaded, autoHighlightEnabled, autoHighlightExpr, applyAutoHighlight]);
 
   const resetPaths = useCallback(() => {
     setManualNodes([]);
