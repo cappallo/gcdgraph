@@ -87,12 +87,15 @@ export const isPrime = (n: number): boolean => {
 };
 
 const MAX_NTH_PRIME = 200_000;
+const MAX_NTH_PRIME_POWER = 200_000;
 const MAX_PI_N = 3_000_000;
 
 let SIEVE_MAX = 1;
 let SIEVE_IS_COMPOSITE = new Uint8Array(2);
 let SIEVE_PI_PREFIX = new Uint32Array(2);
 let SIEVE_PRIMES: number[] = [];
+let PRIME_POWERS_MAX = 0;
+let PRIME_POWERS_LIST: number[] = [];
 
 const buildSieveUpTo = (limit: number): void => {
   const n = Math.max(1, Math.floor(limit));
@@ -147,6 +150,36 @@ export const nthPrime = (nRaw: number): number => {
   if (!Number.isFinite(bound) || bound > MAX_PI_N) return NaN;
   ensureSieve(bound);
   return SIEVE_PRIMES[n - 1]!;
+};
+
+const buildPrimePowersUpTo = (limit: number): void => {
+  const n = Math.max(2, Math.floor(limit));
+  ensureSieve(n);
+  const powers: number[] = [];
+  for (const p of SIEVE_PRIMES) {
+    if (p > n) break;
+    let value = p;
+    while (value <= n) {
+      powers.push(value);
+      if (value > n / p) break;
+      value *= p;
+    }
+  }
+  powers.sort((a, b) => a - b);
+  PRIME_POWERS_LIST = powers;
+  PRIME_POWERS_MAX = n;
+};
+
+export const nthPrimePower = (nRaw: number): number => {
+  if (!Number.isFinite(nRaw)) return NaN;
+  const n = Math.floor(Math.abs(nRaw));
+  if (n < 1) return NaN;
+  if (n > MAX_NTH_PRIME_POWER) return NaN;
+
+  const bound = nthPrimeUpperBound(n);
+  if (!Number.isFinite(bound) || bound > MAX_PI_N) return NaN;
+  if (bound > PRIME_POWERS_MAX) buildPrimePowersUpTo(bound);
+  return PRIME_POWERS_LIST[n - 1] ?? NaN;
 };
 
 export const primePi = (nRaw: number): number => {
@@ -324,6 +357,12 @@ export const createTransformFunction = (
   };
 
   const funcs: Record<string, (v: number) => number> = {
+    sign: (v: number) => {
+      if (v === 0) return 0;
+      if (v > 0) return 1;
+      if (v < 0) return -1;
+      return 0; // NaN
+    },
     sin: Math.sin,
     cos: Math.cos,
     tan: Math.tan,
@@ -337,6 +376,7 @@ export const createTransformFunction = (
     fib: fibonacci,
     fact: factorial,
     prime: nthPrime,
+    primepower: nthPrimePower,
     pi: primePi,
     isprime: (v: number) => (isPrime(v) ? 1 : 0),
   };
@@ -608,6 +648,12 @@ export const createTransformFunction = (
           stack.push(fibonacciBigInt(a));
           continue;
         }
+        if (tok.name === "sign") {
+          if (stack.length < 1) return null;
+          const a = stack.pop()!;
+          stack.push(a === 0n ? 0n : a > 0n ? 1n : -1n);
+          continue;
+        }
         return null; // unsupported function in bigint mode
       }
     }
@@ -660,7 +706,7 @@ export const createTransformFunction = (
     return fallback;
   }
 
-  const bigintFuncs = new Set(["fib"]);
+  const bigintFuncs = new Set(["fib", "sign"]);
 
   const supportsBigInt = tokens.every((t) => {
     if (t.type === "func") return bigintFuncs.has(t.name);

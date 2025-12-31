@@ -26,6 +26,12 @@ console.log("2^30+1:", powerFn(30), "(expected: 1073741825)");
 console.log("2^40+1:", powerFn(40), "(expected: 1099511627777)");
 console.log("2^50+1:", powerFn(50), "(expected: 1125899906842625)");
 
+console.log("\nTesting sign function:");
+const signFn = createTransformFunction("sign(n)");
+console.log("sign(-10):", signFn(-10), "(expected: -1)");
+console.log("sign(0):", signFn(0), "(expected: 0)");
+console.log("sign(10):", signFn(10), "(expected: 1)");
+
 console.log(
   "\nNote: JavaScript Numbers use IEEE 754 double precision, which can only"
 );

@@ -1,4 +1,4 @@
-import { gcd, getSmallestPrimeFactor, isPrime, nthPrime, primePi } from './math';
+import { gcd, getSmallestPrimeFactor, isPrime, nthPrime, nthPrimePower, primePi } from './math';
 
 export type MovePredicate = ((x: number, y: number) => boolean) & {
   isDefaultCoprimeRule?: boolean;
@@ -400,6 +400,7 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
       const name = node.name;
 
       const unaryMath: Record<string, (v: number) => number> = {
+        sign: (v) => (v === 0 ? 0 : v > 0 ? 1 : v < 0 ? -1 : 0),
         sin: Math.sin,
         cos: Math.cos,
         tan: Math.tan,
@@ -413,6 +414,7 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
         fib,
         fact,
         prime: nthPrime,
+        primepower: nthPrimePower,
         pi: primePi,
         isprime: (v) => (isPrime(Math.round(v)) ? 1 : 0)
       };
@@ -462,10 +464,11 @@ const validateNum = (node: NumNode): void => {
       const argc = node.args.length;
       node.args.forEach(validateNum);
 
-      const unaryMath = new Set(['sin', 'cos', 'tan', 'log', 'sqrt', 'abs', 'floor', 'ceil', 'round', 'exp']);
+      const unaryMath = new Set(['sign', 'sin', 'cos', 'tan', 'log', 'sqrt', 'abs', 'floor', 'ceil', 'round', 'exp']);
       unaryMath.add('fib');
       unaryMath.add('fact');
       unaryMath.add('prime');
+      unaryMath.add('primepower');
       unaryMath.add('pi');
       unaryMath.add('isprime');
       if (unaryMath.has(name)) {
