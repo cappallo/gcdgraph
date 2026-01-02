@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, gcdBigInt, formatValue, createTransformFunction, getPrimeFactorCount, isPrime, TransformFunction } from '../utils/math';
+import { gcd, gcdBigInt, gcdIsOneBigInt, formatValue, createTransformFunction, getPrimeFactorCount, isPrime, TransformFunction } from '../utils/math';
 import { Viewport, Point, Theme } from '../types';
 import { getRowShiftMagnitude } from '../utils/grid';
 import { MovePredicate } from '../utils/moveRule';
@@ -168,9 +168,11 @@ const formatBigIntCompact = (raw: string): string => {
 
 const labelFont = (size: number) => `bold ${size}px 'SFMono-Regular','Menlo','Consolas','Liberation Mono',monospace`;
 
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const BIGINT_X_CACHE_LIMIT = 100000;
 const BIGINT_Y_CACHE_LIMIT = 100000;
-const BIGINT_GCD_CACHE_LIMIT = 200000;
+const BIGINT_GCD_FLAG_CACHE_LIMIT = 400000;
+const BIGINT_GCD_VALUE_CACHE_LIMIT = 50000;
 
 const makeLabel = (
   val: number,
@@ -236,7 +238,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
   const bigIntXCache = useRef<Map<bigint, bigint | null>>(new Map());
   const bigIntYCache = useRef<Map<bigint, bigint | null>>(new Map());
-  const bigGcdCache = useRef<Map<string, bigint | null>>(new Map());
+  const bigGcdIsOneCache = useRef<Map<string, boolean | null>>(new Map());
+  const bigGcdValueCache = useRef<Map<string, bigint>>(new Map());
   const cacheKeyRef = useRef<string>("");
 
   // External reset for all user-created paths
@@ -261,12 +264,13 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return gx;
   }, [rowShift, randomizeShift, getRowShiftMagnitude]);
 
-  const computeBigGcd = useCallback((gx: number, gy: number): bigint | null => {
+  const computeBigIsCoprime = useCallback((gx: number, gy: number): boolean | null => {
     if (cacheKeyRef.current !== cacheKey) {
       cacheKeyRef.current = cacheKey;
       bigIntXCache.current.clear();
       bigIntYCache.current.clear();
-      bigGcdCache.current.clear();
+      bigGcdIsOneCache.current.clear();
+      bigGcdValueCache.current.clear();
     }
     if (!moveRightPredicate.isDefaultCoprimeRule) return null;
     const evalBigInt = activeTransform.evalBigInt;
@@ -276,8 +280,17 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const yInt = Math.round(gy);
 
     const gcdKey = `${xInt},${yInt}`;
-    const gcdCache = bigGcdCache.current;
-    if (gcdCache.has(gcdKey)) return gcdCache.get(gcdKey)!;
+    const flagCache = bigGcdIsOneCache.current;
+    if (flagCache.has(gcdKey)) return flagCache.get(gcdKey)!;
+
+    const valueCache = bigGcdValueCache.current;
+    if (valueCache.has(gcdKey)) {
+      const g = valueCache.get(gcdKey)!;
+      const isOne = g === 1n;
+      if (flagCache.size >= BIGINT_GCD_FLAG_CACHE_LIMIT) flagCache.clear();
+      flagCache.set(gcdKey, isOne);
+      return isOne;
+    }
 
     const xBig = BigInt(xInt);
     const yBig = BigInt(yInt);
@@ -298,14 +311,71 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const vYBig = getCachedTransform(bigIntYCache.current, BIGINT_Y_CACHE_LIMIT, yBig);
 
     if (vXBig === null || vYBig === null) {
-      if (gcdCache.size >= BIGINT_GCD_CACHE_LIMIT) gcdCache.clear();
-      gcdCache.set(gcdKey, null);
+      if (flagCache.size >= BIGINT_GCD_FLAG_CACHE_LIMIT) flagCache.clear();
+      flagCache.set(gcdKey, null);
+      return null;
+    }
+
+    const isOne = gcdIsOneBigInt(vXBig, vYBig);
+    if (flagCache.size >= BIGINT_GCD_FLAG_CACHE_LIMIT) flagCache.clear();
+    flagCache.set(gcdKey, isOne);
+    return isOne;
+  }, [activeTransform, cacheKey, getEffectiveX, moveRightPredicate.isDefaultCoprimeRule]);
+
+  const computeBigGcdValue = useCallback((gx: number, gy: number): bigint | null => {
+    if (cacheKeyRef.current !== cacheKey) {
+      cacheKeyRef.current = cacheKey;
+      bigIntXCache.current.clear();
+      bigIntYCache.current.clear();
+      bigGcdIsOneCache.current.clear();
+      bigGcdValueCache.current.clear();
+    }
+    if (!moveRightPredicate.isDefaultCoprimeRule) return null;
+    const evalBigInt = activeTransform.evalBigInt;
+    if (!evalBigInt) return null;
+
+    const xInt = Math.round(getEffectiveX(gx, gy));
+    const yInt = Math.round(gy);
+
+    const gcdKey = `${xInt},${yInt}`;
+    const valueCache = bigGcdValueCache.current;
+    if (valueCache.has(gcdKey)) return valueCache.get(gcdKey)!;
+
+    const flagCache = bigGcdIsOneCache.current;
+    const cachedFlag = flagCache.get(gcdKey);
+    if (cachedFlag === null) return null;
+    if (cachedFlag === true) return 1n;
+
+    const xBig = BigInt(xInt);
+    const yBig = BigInt(yInt);
+
+    const getCachedTransform = (
+      cache: Map<bigint, bigint | null>,
+      limit: number,
+      value: bigint
+    ) => {
+      if (cache.has(value)) return cache.get(value)!;
+      if (cache.size >= limit) cache.clear();
+      const computed = evalBigInt(value);
+      cache.set(value, computed);
+      return computed;
+    };
+
+    const vXBig = getCachedTransform(bigIntXCache.current, BIGINT_X_CACHE_LIMIT, xBig);
+    const vYBig = getCachedTransform(bigIntYCache.current, BIGINT_Y_CACHE_LIMIT, yBig);
+
+    if (vXBig === null || vYBig === null) {
+      if (flagCache.size >= BIGINT_GCD_FLAG_CACHE_LIMIT) flagCache.clear();
+      flagCache.set(gcdKey, null);
       return null;
     }
 
     const gcdExact = gcdBigInt(vXBig, vYBig);
-    if (gcdCache.size >= BIGINT_GCD_CACHE_LIMIT) gcdCache.clear();
-    gcdCache.set(gcdKey, gcdExact);
+    if (valueCache.size >= BIGINT_GCD_VALUE_CACHE_LIMIT) valueCache.clear();
+    valueCache.set(gcdKey, gcdExact);
+    const isOne = gcdExact === 1n;
+    if (flagCache.size >= BIGINT_GCD_FLAG_CACHE_LIMIT) flagCache.clear();
+    flagCache.set(gcdKey, isOne);
     return gcdExact;
   }, [activeTransform, cacheKey, getEffectiveX, moveRightPredicate.isDefaultCoprimeRule]);
 
@@ -315,9 +385,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const effectiveX = getEffectiveX(gx, gy);
 
     // Try BigInt-precise path for the default coprime rule.
-    const gcdExact = computeBigGcd(gx, gy);
-    if (gcdExact !== null) {
-      return gcdExact !== 1n;
+    const isCoprime = computeBigIsCoprime(gx, gy);
+    if (isCoprime !== null) {
+      return !isCoprime;
     }
 
     // Apply Transform (Number path)
@@ -331,7 +401,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     } catch {
       return gcd(vX, vY) !== 1;
     }
-  }, [activeTransform, computeBigGcd, getEffectiveX, moveRightPredicate]);
+  }, [activeTransform, computeBigIsCoprime, getEffectiveX, moveRightPredicate]);
 
   const findPathToBottommostRightmost = useCallback((start: Point): Point[] => {
     // Fast alternative to reverse BFS: search for the rightmost x on a computed "ground" row
@@ -656,42 +726,54 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       for (let gy = minY; gy <= maxY; gy += skipFactor) {
         const { x: screenX, y: screenY } = toScreen(gx, gy);
         
-        const gcdExact = computeBigGcd(gx, gy);
+        const isCoprime = computeBigIsCoprime(gx, gy);
 
         // Calculate display value
         const effectiveX = getEffectiveX(gx, gy);
-        const needsNumberEval = gcdExact === null || simpleView;
+        const needsNumberEval = isCoprime === null || simpleView;
         const vX = needsNumberEval ? Math.round(activeTransform(effectiveX)) : 0;
         const vY = needsNumberEval ? Math.round(activeTransform(gy)) : 0;
-        
+
+        let gcdExact: bigint | null = null;
+        let displayVal: number;
+        let isBig = false;
+
+        if (isCoprime !== null) {
+          const needsBigValue =
+            (simpleView && !isCoprime) || (showText && skipFactor === 1 && !isCoprime);
+          if (needsBigValue) {
+            gcdExact = computeBigGcdValue(gx, gy);
+          }
+          if (gcdExact !== null) {
+            isBig = gcdExact > MAX_SAFE_BIGINT;
+            displayVal = isBig ? Number.MAX_SAFE_INTEGER : Number(gcdExact);
+          } else {
+            displayVal = isCoprime ? 1 : 2;
+          }
+        } else {
+          displayVal = gcd(vX, vY);
+        }
+
         // Always derive direction from the active move rule.
         // `checkGoesNorth` already uses the BigInt-precise path for the default coprime rule.
         let goesNorth: boolean;
-        if (gcdExact !== null) {
-          goesNorth = gcdExact !== 1n;
+        if (isCoprime !== null) {
+          goesNorth = !isCoprime;
         } else {
           try {
             goesNorth = !moveRightPredicate(vX, vY);
           } catch {
-            goesNorth = gcd(vX, vY) !== 1;
+            goesNorth = displayVal !== 1;
           }
         }
         
-        const displayVal = gcdExact !== null
-          ? (gcdExact <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(gcdExact) : Number.MAX_SAFE_INTEGER)
-          : gcd(vX, vY);
-
-        const bigLabel = gcdExact !== null && gcdExact > BigInt(Number.MAX_SAFE_INTEGER)
-          ? gcdExact.toString()
-          : null;
-        
         // Visibility Logic
         // 1. Hide 1s always (unless origin)
-        let hideNode = gcdExact !== null ? gcdExact === 1n : (displayVal === 1);
+        let hideNode = isCoprime !== null ? isCoprime : (displayVal === 1);
 
         // 2. Simple View Logic with Degree
         if (simpleView && !hideNode) {
-          const valForSimple = bigLabel ? null : displayVal;
+          const valForSimple = isBig ? null : displayVal;
           if (valForSimple === null || valForSimple <= 1) {
             hideNode = true;
           } else {
@@ -753,6 +835,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
               ? colors.origin
               : (displayVal === 1 ? colors.nodeCoprime : colors.nodeFactor);
 
+            const bigLabel = gcdExact !== null && gcdExact > MAX_SAFE_BIGINT
+              ? gcdExact.toString()
+              : null;
             const label = makeLabel(displayVal, bigLabel, showFactored);
             if (label) {
                 const fontSize = Math.min(nodeSize * 0.4, 16);
@@ -824,30 +909,50 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             for (const p of path.points) {
                 if (p.x < minX - 1 || p.x > maxX + 1 || p.y < minY - 1 || p.y > maxY + 1) continue;
                 
-                const gcdExactPath = computeBigGcd(p.x, p.y);
+                const isCoprimePath = computeBigIsCoprime(p.x, p.y);
                 const effectiveX = getEffectiveX(p.x, p.y);
-                const valX = activeTransform(effectiveX);
-                const valY = activeTransform(p.y);
-                const val = gcdExactPath !== null
-                  ? (gcdExactPath <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(gcdExactPath) : Number.MAX_SAFE_INTEGER)
-                  : gcd(Math.round(valX), Math.round(valY));
-                const bigLabelPath = gcdExactPath !== null && gcdExactPath > BigInt(Number.MAX_SAFE_INTEGER)
-                  ? gcdExactPath.toString()
-                  : null;
+                const needsNumberEval = isCoprimePath === null || simpleView;
+                const vX = needsNumberEval ? Math.round(activeTransform(effectiveX)) : 0;
+                const vY = needsNumberEval ? Math.round(activeTransform(p.y)) : 0;
+
+                let gcdExactPath: bigint | null = null;
+                let val: number;
+                let isBig = false;
+
+                if (isCoprimePath !== null) {
+                  const needsBigValue =
+                    (simpleView && !isCoprimePath) || (showText && skipFactor === 1 && !isCoprimePath);
+                  if (needsBigValue) {
+                    gcdExactPath = computeBigGcdValue(p.x, p.y);
+                  }
+                  if (gcdExactPath !== null) {
+                    isBig = gcdExactPath > MAX_SAFE_BIGINT;
+                    val = isBig ? Number.MAX_SAFE_INTEGER : Number(gcdExactPath);
+                  } else {
+                    val = isCoprimePath ? 1 : 2;
+                  }
+                } else {
+                  val = gcd(vX, vY);
+                }
 
                 // Visibility Logic for Paths (apply same rules)
-                let hideNode = gcdExactPath !== null ? gcdExactPath === 1n : (val === 1);
+                let hideNode = isCoprimePath !== null ? isCoprimePath : (val === 1);
                 
                 if (simpleView && !hideNode) {
-                    const k = getPrimeFactorCount(val);
-                    if (k !== degree) {
+                    const valForSimple = isBig ? null : val;
+                    if (valForSimple === null || valForSimple <= 1) {
                         hideNode = true;
                     } else {
-                        // Unify logic: Check if gcd equals one of the components
-                        const absVX = Math.abs(Math.round(valX));
-                        const absVY = Math.abs(Math.round(valY));
-                        if (val !== absVX && val !== absVY) {
-                             hideNode = true;
+                        const k = getPrimeFactorCount(valForSimple);
+                        if (k !== degree) {
+                            hideNode = true;
+                        } else {
+                            // Unify logic: Check if gcd equals one of the components
+                            const absVX = Math.abs(vX);
+                            const absVY = Math.abs(vY);
+                            if (valForSimple !== absVX && valForSimple !== absVY) {
+                                 hideNode = true;
+                            }
                         }
                     }
                 }
@@ -867,6 +972,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                 }
 
                 if (showText && skipFactor === 1) {
+                    const bigLabelPath = gcdExactPath !== null && gcdExactPath > MAX_SAFE_BIGINT
+                      ? gcdExactPath.toString()
+                      : null;
                     const label = (gcdExactPath !== null ? gcdExactPath > 1n : val > 1)
                       ? makeLabel(val, bigLabelPath, showFactored)
                       : "";
@@ -938,13 +1046,27 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
                  if (showText && skipFactor === 1) {
                     const effectiveX = getEffectiveX(p.x, p.y);
-                    const valX = activeTransform(effectiveX);
-                    const valY = activeTransform(p.y);
-                    const gcdExactTrace = computeBigGcd(p.x, p.y);
-                    const val = gcdExactTrace !== null
-                      ? (gcdExactTrace <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(gcdExactTrace) : Number.MAX_SAFE_INTEGER)
-                      : gcd(Math.round(valX), Math.round(valY));
-                    const bigLabelTrace = gcdExactTrace !== null && gcdExactTrace > BigInt(Number.MAX_SAFE_INTEGER)
+                    const vX = Math.round(activeTransform(effectiveX));
+                    const vY = Math.round(activeTransform(p.y));
+                    const isCoprimeTrace = computeBigIsCoprime(p.x, p.y);
+
+                    let gcdExactTrace: bigint | null = null;
+                    let val: number;
+
+                    if (isCoprimeTrace !== null) {
+                      if (!isCoprimeTrace) {
+                        gcdExactTrace = computeBigGcdValue(p.x, p.y);
+                      }
+                      if (gcdExactTrace !== null) {
+                        val = gcdExactTrace > MAX_SAFE_BIGINT ? Number.MAX_SAFE_INTEGER : Number(gcdExactTrace);
+                      } else {
+                        val = isCoprimeTrace ? 1 : 2;
+                      }
+                    } else {
+                      val = gcd(vX, vY);
+                    }
+
+                    const bigLabelTrace = gcdExactTrace !== null && gcdExactTrace > MAX_SAFE_BIGINT
                       ? gcdExactTrace.toString()
                       : null;
                     const label = (gcdExactTrace !== null ? gcdExactTrace > 1n : val > 1)
@@ -977,7 +1099,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, computeBigGcd, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate]);
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {

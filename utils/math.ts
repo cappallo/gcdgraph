@@ -10,6 +10,19 @@ export const gcdBigInt = (a: bigint, b: bigint): bigint => {
   return x;
 };
 
+export const gcdIsOneBigInt = (a: bigint, b: bigint): boolean => {
+  let x = a < 0n ? -a : a;
+  let y = b < 0n ? -b : b;
+  if (x === 1n || y === 1n) return true;
+  while (y !== 0n) {
+    const r = x % y;
+    if (r === 1n) return true;
+    x = y;
+    y = r;
+  }
+  return x === 1n;
+};
+
 export const gcd = (a: number, b: number): number => {
   if (!Number.isFinite(a) || !Number.isFinite(b)) return NaN;
 
