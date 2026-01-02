@@ -62,6 +62,43 @@ export const getSmallestPrimeFactor = (n: number): number => {
   return n;
 };
 
+export const getGreatestPrimeFactor = (n: number): number => {
+  let temp = Math.abs(Math.round(n));
+  if (temp <= 1) return 1;
+  let gpf = 1;
+  while (temp % 2 === 0) {
+    gpf = 2;
+    temp /= 2;
+  }
+  for (let d = 3; d * d <= temp; d += 2) {
+    while (temp % d === 0) {
+      gpf = d;
+      temp /= d;
+    }
+  }
+  if (temp > 1) gpf = temp;
+  return gpf;
+};
+
+export const eulerTotient = (n: number): number => {
+  let temp = Math.abs(Math.round(n));
+  if (temp === 0) return 0;
+  if (temp === 1) return 1;
+  let result = temp;
+  if (temp % 2 === 0) {
+    result -= result / 2;
+    while (temp % 2 === 0) temp /= 2;
+  }
+  for (let p = 3; p * p <= temp; p += 2) {
+    if (temp % p === 0) {
+      result -= result / p;
+      while (temp % p === 0) temp /= p;
+    }
+  }
+  if (temp > 1) result -= result / temp;
+  return result;
+};
+
 export const isComposite = (n: number): boolean => {
   if (n <= 3) return false;
   if (n % 2 === 0) return true;
@@ -388,6 +425,10 @@ export const createTransformFunction = (
     exp: Math.exp,
     fib: fibonacci,
     fact: factorial,
+    spf: (v: number) => getSmallestPrimeFactor(Math.round(v)),
+    lpf: (v: number) => getSmallestPrimeFactor(Math.round(v)),
+    gpf: (v: number) => getGreatestPrimeFactor(v),
+    phi: (v: number) => eulerTotient(v),
     prime: nthPrime,
     primepower: nthPrimePower,
     pi: primePi,

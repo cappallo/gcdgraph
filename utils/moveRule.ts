@@ -1,4 +1,13 @@
-import { gcd, getSmallestPrimeFactor, isPrime, nthPrime, nthPrimePower, primePi } from './math';
+import {
+  eulerTotient,
+  gcd,
+  getGreatestPrimeFactor,
+  getSmallestPrimeFactor,
+  isPrime,
+  nthPrime,
+  nthPrimePower,
+  primePi
+} from './math';
 
 export type MovePredicate = ((x: number, y: number) => boolean) & {
   isDefaultCoprimeRule?: boolean;
@@ -36,25 +45,6 @@ class ParseError extends Error {
     this.name = 'ParseError';
   }
 }
-
-const getGreatestPrimeFactor = (n: number): number => {
-  n = Math.abs(Math.round(n));
-  if (n <= 1) return 1;
-  let temp = n;
-  let gpf = 1;
-  while (temp % 2 === 0) {
-    gpf = 2;
-    temp /= 2;
-  }
-  for (let d = 3; d * d <= temp; d += 2) {
-    while (temp % d === 0) {
-      gpf = d;
-      temp /= d;
-    }
-  }
-  if (temp > 1) gpf = temp;
-  return gpf;
-};
 
 const fibCache = new Map<number, number>();
 const fibBigCache = new Map<bigint, bigint>();
@@ -416,6 +406,7 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
         prime: nthPrime,
         primepower: nthPrimePower,
         pi: primePi,
+        phi: eulerTotient,
         isprime: (v) => (isPrime(Math.round(v)) ? 1 : 0)
       };
 
@@ -470,6 +461,7 @@ const validateNum = (node: NumNode): void => {
       unaryMath.add('prime');
       unaryMath.add('primepower');
       unaryMath.add('pi');
+      unaryMath.add('phi');
       unaryMath.add('isprime');
       if (unaryMath.has(name)) {
         if (argc !== 1) throw new ParseError(`${name}() takes 1 argument.`);

@@ -557,7 +557,7 @@ const Controls: React.FC<ControlsProps> = ({
                   onKeyDown={handleKeyDown}
                   className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
                   placeholder="e.g. 2^n+1, fib(n), fact(n)"
-                  title="Supports: +, -, *, /, ^, fib(n), fact(n), prime(n), primepower(n), pi(n), sign(n), sin, cos, tan, log, sqrt, abs, floor, ceil, round, exp"
+                  title="Supports: +, -, *, /, ^, fib(n), fact(n), spf(n)/lpf(n), gpf(n), phi(n), prime(n), primepower(n), pi(n), sign(n), sin, cos, tan, log, sqrt, abs, floor, ceil, round, exp"
                 />
               </div>
             </div>
@@ -579,7 +579,7 @@ const Controls: React.FC<ControlsProps> = ({
                 onKeyDown={handleMoveRightKeyDown}
                 className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
                 placeholder="e.g. gcd(x+y,y)>1 || lpf(gcd(x,y))==1"
-                title="Supports: comparisons (==, !=, <, <=, >, >=), logic (&&, ||, !), +, -, *, /, ^, gcd(a,b), spf(n)/lpf(n), gpf(n), fib(n), fact(n), prime(n), primepower(n), pi(n), sign(n), sin, cos, tan, log, sqrt, abs, floor, ceil, round, exp"
+                title="Supports: comparisons (==, !=, <, <=, >, >=), logic (&&, ||, !), +, -, *, /, ^, gcd(a,b), spf(n)/lpf(n), gpf(n), phi(n), fib(n), fact(n), prime(n), primepower(n), pi(n), sign(n), sin, cos, tan, log, sqrt, abs, floor, ceil, round, exp"
               />
               <p className="text-[10px] opacity-60 mt-1">
                 Variables x,y are after transform f(n) + row shift.
