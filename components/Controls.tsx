@@ -38,6 +38,8 @@ interface ControlsProps {
   moveRightError?: string;
   simpleView: boolean;
   setSimpleView: (b: boolean) => void;
+  wraparound: boolean;
+  setWraparound: (b: boolean) => void;
   showFactored: boolean;
   setShowFactored: (b: boolean) => void;
   rowShift: number;
@@ -83,6 +85,8 @@ const Controls: React.FC<ControlsProps> = ({
   moveRightError,
   simpleView,
   setSimpleView,
+  wraparound,
+  setWraparound,
   showFactored,
   setShowFactored,
   rowShift,
@@ -741,6 +745,20 @@ const Controls: React.FC<ControlsProps> = ({
                   className="w-4 h-4 accent-indigo-600 rounded"
                   checked={simpleView}
                   onChange={(e) => setSimpleView(e.target.checked)}
+                />
+              </label>
+
+              <label
+                className={`flex items-center justify-between text-sm font-medium cursor-pointer ${
+                  isDark ? "text-gray-300" : "text-gray-700"
+                }`}
+              >
+                <span>Wraparound</span>
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-indigo-600 rounded"
+                  checked={wraparound}
+                  onChange={(e) => setWraparound(e.target.checked)}
                 />
               </label>
 

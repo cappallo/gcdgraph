@@ -51,6 +51,7 @@ interface SettingsSnapshot {
   transformFunc: string;
   moveRightExpr: string;
   simpleView: boolean;
+  wraparound: boolean;
   showFactored: boolean;
   rowShift: number;
   shiftLock: boolean;
@@ -80,6 +81,7 @@ const DEFAULT_SETTINGS_SNAPSHOT: SettingsSnapshot = {
   transformFunc: "n",
   moveRightExpr: DEFAULT_MOVE_RIGHT_EXPR,
   simpleView: false,
+  wraparound: false,
   showFactored: true,
   rowShift: 0,
   shiftLock: false,
@@ -155,6 +157,7 @@ function App() {
     DEFAULT_MOVE_RIGHT_EXPR
   );
   const [simpleView, setSimpleView] = useState(false);
+  const [wraparound, setWraparound] = useState(false);
   const [showFactored, setShowFactored] = useState(true);
   const [rowShift, setRowShift] = useState<number>(0);
   const [rowShiftBounds, setRowShiftBounds] =
@@ -269,6 +272,12 @@ function App() {
       if (typeof data.moveRightExpr === "string")
         setMoveRightExpr(data.moveRightExpr);
       if (typeof data.simpleView === "boolean") setSimpleView(data.simpleView);
+      const parsedWraparound = parseStoredBoolean((data as any).wraparound);
+      if (typeof parsedWraparound === "boolean") {
+        setWraparound(parsedWraparound);
+      } else if (!Object.prototype.hasOwnProperty.call(data, "wraparound")) {
+        setWraparound(false);
+      }
       if (typeof data.showFactored === "boolean")
         setShowFactored(data.showFactored);
       if (data.rowShiftBounds) setRowShiftBounds(nextRowShiftBounds);
@@ -330,6 +339,7 @@ function App() {
       transformFunc,
       moveRightExpr,
       simpleView,
+      wraparound,
       showFactored,
       rowShift,
       shiftLock,
@@ -351,6 +361,7 @@ function App() {
       transformFunc,
       moveRightExpr,
       simpleView,
+      wraparound,
       showFactored,
       rowShift,
       shiftLock,
@@ -460,6 +471,7 @@ function App() {
       transformFunc,
       moveRightExpr,
       simpleView,
+      wraparound,
       showFactored,
       rowShift,
       shiftLock,
@@ -484,6 +496,7 @@ function App() {
     transformFunc,
     moveRightExpr,
     simpleView,
+    wraparound,
     showFactored,
     rowShift,
     shiftLock,
@@ -673,9 +686,16 @@ function App() {
         }
       };
 
+      const getNorthStepY = (currX: number, currY: number) => {
+        const nextY = currY + 1;
+        if (wraparound && nextY === currX) return 2;
+        return nextY;
+      };
+
       const traceForwardEnd = (start: Point, maxSteps: number): Point => {
         let currX = start.x;
         let currY = start.y;
+        const seen = new Set<string>([pointKey(start)]);
 
         const canFastForward =
           moveRightPredicate.isDefaultCoprimeRule === true &&
@@ -688,8 +708,12 @@ function App() {
         while (stepsUsed < stepsLimit) {
           const goesNorth = checkGoesNorth(currX, currY);
           if (goesNorth) {
-            currY += 1;
+            const nextY = getNorthStepY(currX, currY);
+            const nextKey = pointKey({ x: currX, y: nextY });
+            if (seen.has(nextKey)) break;
+            currY = nextY;
             stepsUsed += 1;
+            seen.add(nextKey);
             continue;
           }
 
@@ -731,6 +755,7 @@ function App() {
           let currX = startX;
           let currY = groundY;
           let lastXAtTargetRow: number | null = null;
+          const seen = new Set<string>([pointKey({ x: currX, y: currY })]);
 
           // Hard cap to prevent pathological loops.
           const maxIters = 5_000_000;
@@ -748,8 +773,12 @@ function App() {
 
             const goesNorth = checkGoesNorth(currX, currY);
             if (goesNorth) {
-              currY += 1;
+              const nextY = getNorthStepY(currX, currY);
+              const nextKey = pointKey({ x: currX, y: nextY });
+              if (seen.has(nextKey)) break;
+              currY = nextY;
               iters += 1;
+              seen.add(nextKey);
               continue;
             }
 
@@ -786,6 +815,7 @@ function App() {
 
             currX = nextX;
             iters += jump;
+            seen.add(pointKey({ x: currX, y: currY }));
           }
 
           if (lastXAtTargetRow === null) return "tooLeft";
@@ -866,6 +896,7 @@ function App() {
       randomizeShift,
       rowShift,
       transformFunc,
+      wraparound,
     ]
   );
 
@@ -977,6 +1008,7 @@ function App() {
         showFactored={showFactored}
         rowShift={rowShift}
         randomizeShift={randomizeShift}
+        wraparound={wraparound}
         onCursorMove={setCursorPos}
         degree={degree}
         resetPathsSignal={resetPathsSignal}
@@ -998,6 +1030,8 @@ function App() {
         moveRightError={moveRight.error}
         simpleView={simpleView}
         setSimpleView={setSimpleView}
+        wraparound={wraparound}
+        setWraparound={setWraparound}
         showFactored={showFactored}
         setShowFactored={setShowFactored}
         rowShift={rowShift}

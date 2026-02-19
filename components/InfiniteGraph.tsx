@@ -14,6 +14,7 @@ interface InfiniteGraphProps {
   showFactored: boolean;
   rowShift: number;
   randomizeShift: boolean;
+  wraparound: boolean;
   onCursorMove: (p: Point) => void;
   degree: number;
   resetPathsSignal: number;
@@ -198,6 +199,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   showFactored,
   rowShift,
   randomizeShift,
+  wraparound,
   onCursorMove,
   degree,
   resetPathsSignal,
@@ -403,12 +405,22 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     }
   }, [activeTransform, computeBigIsCoprime, getEffectiveX, moveRightPredicate]);
 
+  const getNorthStepY = useCallback(
+    (currX: number, currY: number) => {
+      const nextY = currY + 1;
+      if (wraparound && nextY === currX) return 2;
+      return nextY;
+    },
+    [wraparound]
+  );
+
   const findPathToBottommostRightmost = useCallback((start: Point): Point[] => {
     // Fast alternative to reverse BFS: search for the rightmost x on a computed "ground" row
     // whose forward path reaches `start`, then trace forward to reconstruct.
     const traceForwardEnd = (from: Point, maxSteps: number): Point => {
       let currX = from.x;
       let currY = from.y;
+      const seen = new Set<string>([`${currX},${currY}`]);
 
       const stepsLimit = Math.max(0, Math.floor(maxSteps));
       let stepsUsed = 0;
@@ -416,8 +428,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       while (stepsUsed < stepsLimit) {
         const goesNorth = checkGoesNorth(currX, currY);
         if (goesNorth) {
-          currY += 1;
+          const nextY = getNorthStepY(currX, currY);
+          const nextKey = `${currX},${nextY}`;
+          if (seen.has(nextKey)) break;
+          currY = nextY;
           stepsUsed += 1;
+          seen.add(nextKey);
           continue;
         }
 
@@ -453,6 +469,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       let currX = startX;
       let currY = groundY;
       let lastXAtTargetRow: number | null = null;
+      const seen = new Set<string>([`${currX},${currY}`]);
 
       const maxIters = 5_000_000;
       let iters = 0;
@@ -465,8 +482,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
         const goesNorth = checkGoesNorth(currX, currY);
         if (goesNorth) {
-          currY += 1;
+          const nextY = getNorthStepY(currX, currY);
+          const nextKey = `${currX},${nextY}`;
+          if (seen.has(nextKey)) break;
+          currY = nextY;
           iters += 1;
+          seen.add(nextKey);
           continue;
         }
 
@@ -491,6 +512,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
         currX = nextX;
         iters += jump;
+        seen.add(`${currX},${currY}`);
       }
 
       if (lastXAtTargetRow === null) return 'tooLeft';
@@ -503,6 +525,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       const points: Point[] = [from];
       let currX = from.x;
       let currY = from.y;
+      const seen = new Set<string>([`${currX},${currY}`]);
       const maxIters = 5_000_000;
       let iters = 0;
 
@@ -511,9 +534,13 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
         const goesNorth = checkGoesNorth(currX, currY);
         if (goesNorth) {
-          currY += 1;
+          const nextY = getNorthStepY(currX, currY);
+          const nextKey = `${currX},${nextY}`;
+          if (seen.has(nextKey)) break;
+          currY = nextY;
           points.push({ x: currX, y: currY });
           iters += 1;
+          seen.add(nextKey);
           continue;
         }
 
@@ -538,8 +565,11 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         }
 
         currX = nextX;
+        const nextKey = `${currX},${currY}`;
+        if (seen.has(nextKey)) break;
         points.push({ x: currX, y: currY });
         iters += jump;
+        seen.add(nextKey);
       }
 
       return null;
@@ -582,7 +612,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
     // UI expects tracedPath[0] === clicked node, and last === chosen ground.
     return forward.slice().reverse();
-  }, [checkGoesNorth, canFastForward, getEffectiveX]);
+  }, [checkGoesNorth, canFastForward, getEffectiveX, getNorthStepY]);
 
   // If the user changes the move rule / transform / row-shift while a backtrace is visible,
   // recompute it so it stays consistent with the new evaluation.
@@ -592,22 +622,27 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       return;
     }
     setTracedPath(findPathToBottommostRightmost(tracedAnchor.current));
-  }, [findPathToBottommostRightmost, moveRightPredicate, transformFunc, rowShift, randomizeShift]);
+  }, [findPathToBottommostRightmost, moveRightPredicate, transformFunc, rowShift, randomizeShift, wraparound]);
 
   // Helper to trace a path forward from a given point
   const traceForward = useCallback((startX: number, startY: number) => {
     const points: Point[] = [{ x: startX, y: startY }];
     let currX = startX;
     let currY = startY;
+    const seen = new Set<string>([`${currX},${currY}`]);
     const maxSteps = Math.max(1, pathStepLimit);
     let stepsUsed = 0;
 
     while (stepsUsed < maxSteps) {
       const goesNorth = checkGoesNorth(currX, currY);
       if (goesNorth) {
-        currY += 1;
+        const nextY = getNorthStepY(currX, currY);
+        const nextKey = `${currX},${nextY}`;
+        if (seen.has(nextKey)) break;
+        currY = nextY;
         stepsUsed += 1;
         points.push({ x: currX, y: currY });
+        seen.add(nextKey);
         continue;
       }
 
@@ -620,17 +655,23 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const jump = rem === 0 ? 1 : Math.min(p - rem, maxSteps - stepsUsed);
 
         currX += jump;
+        const nextKey = `${currX},${currY}`;
+        if (seen.has(nextKey)) break;
         stepsUsed += jump;
         points.push({ x: currX, y: currY });
+        seen.add(nextKey);
         continue;
       }
 
       currX += 1;
+      const nextKey = `${currX},${currY}`;
+      if (seen.has(nextKey)) break;
       stepsUsed += 1;
       points.push({ x: currX, y: currY });
+      seen.add(nextKey);
     }
     return points;
-  }, [checkGoesNorth, pathStepLimit, canFastForward, getEffectiveX]);
+  }, [checkGoesNorth, pathStepLimit, canFastForward, getEffectiveX, getNorthStepY]);
 
   // Calculate user-defined custom paths
   const customPaths = useMemo(() => {
@@ -690,6 +731,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       x: (gx - centerX) * zoom + halfWidth,
       y: -(gy - centerY) * zoom + halfHeight
     });
+
+    const isWrapDiscontinuity = (p1: Point, p2: Point) =>
+      wraparound && p1.x === p2.x && Math.abs(p2.y - p1.y) > 1;
 
     // Thicker connections (Twice as wide)
     const gridLineWidth = Math.max(2, zoom / 7.5);
@@ -876,6 +920,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             const p1 = path.points[i];
             const p2 = path.points[i+1];
 
+            if (isWrapDiscontinuity(p1, p2)) continue;
+
             if (p1.x < minX - 1 && p2.x < minX - 1) continue;
             if (p1.x > maxX + 1 && p2.x > maxX + 1) continue;
             if (p1.y < minY - 1 && p2.y < minY - 1) continue;
@@ -1003,9 +1049,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         ctx.moveTo(sStart.x, sStart.y);
 
         for (let i = 1; i < tracedPath.length; i++) {
+            const prev = tracedPath[i - 1];
             const p = tracedPath[i];
             const s = toScreen(p.x, p.y);
-            ctx.lineTo(s.x, s.y);
+            if (isWrapDiscontinuity(prev, p)) {
+                ctx.moveTo(s.x, s.y);
+            } else {
+                ctx.lineTo(s.x, s.y);
+            }
         }
 
         // Draw Glow/Halo for Traced Path
@@ -1099,7 +1150,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate]);
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {
