@@ -1,0 +1,553 @@
+/**
+ * Unified backtrace utilities for finding ground-row predecessors.
+ *
+ * Used by:
+ *  - InfiniteGraph right-click (full path from target to ground)
+ *  - App auto-highlight go-to-ground (ground point only)
+ */
+import { Point } from '../types';
+import { isPrime, getSmallestPrimeFactor } from './math';
+
+export interface BacktraceConfig {
+  /** Returns true if the point steps north, false if it steps east. */
+  checkGoesNorth: (x: number, y: number) => boolean;
+  /** Returns the y-coordinate after stepping north from (x, y). */
+  getNorthStepY: (x: number, y: number) => number;
+  /** Returns the effective x-coordinate accounting for row shift. */
+  getEffectiveX: (gx: number, gy: number) => number;
+  /** The y-coordinate of the ground row. */
+  groundRow: number;
+  /** Maximum nodes to explore in BFS reverse search. */
+  backtraceLimit: number;
+  /** Whether the identity-transform prime-skip is available (transform ≡ n). */
+  canFastForward: boolean;
+  /** Whether wraparound is enabled. */
+  wraparound: boolean;
+  /**
+   * The active transform function f(n) applied to coordinates.
+   * Required for the generalized east-skip when canFastForward is false.
+   */
+  transform?: (n: number) => number;
+  /** Whether the move-right rule is `gcd(x,y)==1` (default coprime). */
+  isDefaultCoprimeRule?: boolean;
+  /**
+   * When ground row is unreachable, prefer the **leftmost** ancestor
+   * (longest partial trace) instead of rightmost.  Default: true.
+   */
+  partialTraceLeftmost?: boolean;
+}
+
+// ── Internal constants ──────────────────────────────────────────────────────
+
+/** Hard cap on iterations for a single forward probe / trace. */
+const MAX_PROBE_ITERS = 50_000_000;
+/** Maximum search range (left of target.x) for the binary search. */
+const MAX_SEARCH_RANGE = 1_000_000_000;
+
+// ── Modular arithmetic helpers ──────────────────────────────────────────────
+
+/** Extended-GCD-based modular inverse. Returns a^-1 mod m, or null. */
+function modInverse(a: number, m: number): number | null {
+  a = ((a % m) + m) % m;
+  let [old_r, r] = [a, m];
+  let [old_s, s] = [1, 0];
+  while (r !== 0) {
+    const q = Math.floor(old_r / r);
+    [old_r, r] = [r, old_r - q * r];
+    [old_s, s] = [s, old_s - q * s];
+  }
+  if (old_r !== 1) return null;
+  return ((old_s % m) + m) % m;
+}
+
+// ── Linear-transform detection ──────────────────────────────────────────────
+
+interface LinearTransform { a: number; b: number; }
+
+/** Heuristically detect f(n) = a*n + b by evaluating at a few points. */
+function detectLinear(f: (n: number) => number): LinearTransform | null {
+  const f0 = Math.round(f(0));
+  const f1 = Math.round(f(1));
+  const a = f1 - f0;
+  const b = f0;
+  if (Math.round(f(2))  !== 2  * a + b) return null;
+  if (Math.round(f(10)) !== 10 * a + b) return null;
+  if (Math.round(f(-3)) !== -3 * a + b) return null;
+  return { a, b };
+}
+
+// ── East-skip computation ───────────────────────────────────────────────────
+
+/**
+ * For the default coprime rule with a LINEAR transform f(n) = a*n + b:
+ * Given current effectiveX on row y (where we are going east), return the
+ * number of east steps to the NEXT position where gcd(f(x'), f(y)) > 1.
+ *
+ * Algorithm: for each distinct prime factor q of |f(y)|, solve
+ *   a*(effectiveX + delta) + b ≡ 0 (mod q)
+ * for the smallest delta > 0. Return the minimum across all factors.
+ */
+function linearEastSkip(
+  effectiveX: number,
+  gy: number,
+  lin: LinearTransform,
+): number {
+  const { a, b } = lin;
+  const transformedY = Math.abs(a * Math.round(gy) + b);
+  if (transformedY <= 1) return 1;
+
+  let V = transformedY;
+  let bestDelta = Infinity;
+
+  while (V > 1) {
+    const q = getSmallestPrimeFactor(V);
+    const aMod = ((a % q) + q) % q;
+
+    if (aMod === 0) {
+      // a ≡ 0 (mod q) → f(x) ≡ b (mod q) for all x.
+      // If q | b every x triggers north (delta=1); otherwise this factor never helps.
+      if (b % q === 0) return 1;
+    } else {
+      // Solve a*delta ≡ -(a*effectiveX + b)  (mod q)
+      const fCurrent = a * effectiveX + b;
+      const negFMod = ((-(fCurrent % q)) % q + q) % q;
+      const inv = modInverse(aMod, q);
+      if (inv !== null) {
+        let delta = (negFMod * inv) % q;
+        if (delta <= 0) delta += q;
+        if (delta < bestDelta) bestDelta = delta;
+      }
+    }
+
+    // Remove all factors of q from V.
+    while (V % q === 0) V = V / q;
+  }
+
+  return bestDelta === Infinity ? 1 : bestDelta;
+}
+
+/**
+ * For the default coprime rule with a NON-LINEAR transform:
+ * Scan delta = 1..q for each prime factor q of |f(y)|, checking
+ * f(effectiveX + delta) % q === 0.  Return the smallest delta found.
+ */
+function generalEastSkip(
+  effectiveX: number,
+  gy: number,
+  transform: (n: number) => number,
+): number | null {
+  const transformedY = Math.abs(Math.round(transform(gy)));
+  if (transformedY <= 1) return null;
+
+  let V = transformedY;
+  let bestDelta = Infinity;
+
+  while (V > 1) {
+    const q = getSmallestPrimeFactor(V);
+    // Scan for the smallest delta in [1, q] where q | f(effectiveX + delta).
+    for (let delta = 1; delta <= q; delta++) {
+      if (delta >= bestDelta) break; // can't improve
+      const fVal = Math.round(transform(effectiveX + delta));
+      if (fVal % q === 0) {
+        bestDelta = delta;
+        break;
+      }
+    }
+    while (V % q === 0) V = V / q;
+  }
+
+  return bestDelta === Infinity ? null : bestDelta;
+}
+
+// ── Unified east-skip entry point ───────────────────────────────────────────
+
+/**
+ * Compute east-skip for the current position using the best available
+ * strategy.  Returns null when no skip is available (fallback to +1).
+ */
+function eastSkip(
+  currX: number,
+  currY: number,
+  config: BacktraceConfig,
+  linear: LinearTransform | null,
+): number | null {
+  // Identity-transform fast path (original canFastForward).
+  if (config.canFastForward) {
+    const p = Math.abs(currY);
+    if (isPrime(p) && p > 1) {
+      const effectiveX = config.getEffectiveX(currX, currY);
+      const rem = ((effectiveX % p) + p) % p;
+      return rem === 0 ? 1 : p - rem;
+    }
+    return null;
+  }
+
+  // Generalised skip for the default coprime rule with a known transform.
+  if (!config.isDefaultCoprimeRule || !config.transform) return null;
+
+  const effectiveX = config.getEffectiveX(currX, currY);
+
+  if (linear) {
+    return linearEastSkip(effectiveX, currY, linear);
+  }
+  return generalEastSkip(effectiveX, currY, config.transform);
+}
+
+// ── Forward-probe outcome ───────────────────────────────────────────────────
+
+type Outcome = 'hit' | 'tooLeft' | 'tooRight';
+
+/**
+ * Simulate a forward path from (startX, groundY) and classify whether it
+ * reaches, undershoots, or overshoots `target`.
+ */
+function probeOutcome(
+  startX: number,
+  target: Point,
+  groundY: number,
+  config: BacktraceConfig,
+  linear: LinearTransform | null,
+): Outcome {
+  const { checkGoesNorth, getNorthStepY } = config;
+  let currX = startX;
+  let currY = groundY;
+  let lastXAtTargetRow: number | null = null;
+  let iters = 0;
+
+  while (iters < MAX_PROBE_ITERS) {
+    if (currX === target.x && currY === target.y) return 'hit';
+    if (currY === target.y) lastXAtTargetRow = currX;
+    if (currY > target.y) break;
+    if (currX > target.x && currY <= target.y) return 'tooRight';
+
+    if (checkGoesNorth(currX, currY)) {
+      const nextY = getNorthStepY(currX, currY);
+      if (nextY === currY) break;
+      currY = nextY;
+      iters += 1;
+      continue;
+    }
+
+    // Try optimised east-skip.
+    const skip = eastSkip(currX, currY, config, linear);
+    if (skip !== null && skip > 1) {
+      const nextX = currX + skip;
+      // Target on this row lies within the skip range → hit.
+      if (currY === target.y && target.x > currX && target.x <= nextX) return 'hit';
+      // Would overshoot target column before reaching its row → too far right.
+      if (currY < target.y && target.x + 1 > currX && target.x + 1 <= nextX) return 'tooRight';
+      currX = nextX;
+      iters += skip;
+      continue;
+    }
+
+    currX += 1;
+    iters += 1;
+  }
+
+  if (lastXAtTargetRow === null) return 'tooLeft';
+  if (lastXAtTargetRow < target.x) return 'tooLeft';
+  if (lastXAtTargetRow > target.x) return 'tooRight';
+  return 'hit';
+}
+
+// ── Binary search strategy ──────────────────────────────────────────────────
+
+/**
+ * Binary search for the rightmost ground-row x whose deterministic forward
+ * path reaches `target`.  Works for all deterministic north/east rules,
+ * taking advantage of the prime-skip optimisation when available.
+ */
+function findGroundByBinarySearch(
+  target: Point,
+  groundY: number,
+  config: BacktraceConfig,
+  linear: LinearTransform | null,
+): Point | null {
+  const maxX = Math.floor(target.x);
+  const minX = maxX - MAX_SEARCH_RANGE;
+
+  // Exponential probing to find a lower bound where the outcome is no longer 'tooRight'.
+  let probeX = maxX;
+  let step = 1;
+  while (probeX > minX && probeOutcome(probeX, target, groundY, config, linear) === 'tooRight') {
+    probeX = maxX - step;
+    step *= 2;
+  }
+  const lowBound = Math.max(minX, probeX);
+
+  // Standard binary search within [lowBound, maxX].
+  let lo = lowBound;
+  let hi = maxX;
+  let bestHit: number | null = null;
+
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const out = probeOutcome(mid, target, groundY, config, linear);
+    if (out === 'tooLeft') {
+      lo = mid + 1;
+    } else if (out === 'tooRight') {
+      hi = mid - 1;
+    } else {
+      bestHit = mid;
+      lo = mid + 1; // keep looking for a rightward hit
+    }
+  }
+
+  return bestHit !== null ? { x: bestHit, y: groundY } : null;
+}
+
+// ── BFS reverse search ──────────────────────────────────────────────────────
+
+/**
+ * BFS backward from `target` to find the best reachable predecessor.
+ *
+ * Two candidates are tracked separately:
+ *   1. **bestGround** – a node at `groundY` (rightmost x wins, giving the
+ *      most direct path from ground to target).
+ *   2. **bestPartial** – a node below `target.y` but not necessarily at
+ *      ground.  When `partialTraceLeftmost` is true (default), the
+ *      bottommost-leftmost node is chosen (longest trace); otherwise
+ *      bottommost-rightmost.
+ *
+ * `bestGround` is always preferred when it exists; `bestPartial` is the
+ * fallback when ground is unreachable.
+ */
+function findGroundByReverseSearch(
+  target: Point,
+  groundY: number,
+  config: BacktraceConfig,
+): Point {
+  const { checkGoesNorth, getNorthStepY, wraparound, backtraceLimit } = config;
+  const preferLeftmost = config.partialTraceLeftmost !== false; // default true
+  const maxVisited = Math.floor(backtraceLimit);
+
+  const qX: number[] = [target.x];
+  const qY: number[] = [target.y];
+  const seen = new Set<string>();
+  seen.add(`${target.x},${target.y}`);
+
+  let qHead = 0;
+  let visited = 0;
+
+  // Ground-row candidate: rightmost x at groundY.
+  let bestGround: Point | null = target.y === groundY ? target : null;
+  // Partial candidate: bottommost (min y), then leftmost or rightmost x.
+  let bestPartial: Point | null = null;
+
+  const updateGround = (px: number) => {
+    if (!bestGround || px > bestGround.x) {
+      bestGround = { x: px, y: groundY };
+    }
+  };
+
+  const updatePartial = (px: number, py: number) => {
+    if (!bestPartial) { bestPartial = { x: px, y: py }; return; }
+    if (py < bestPartial.y) { bestPartial = { x: px, y: py }; return; }
+    if (py === bestPartial.y) {
+      if (preferLeftmost ? px < bestPartial.x : px > bestPartial.x) {
+        bestPartial = { x: px, y: py };
+      }
+    }
+  };
+
+  while (qHead < qX.length && visited < maxVisited) {
+    const cx = qX[qHead];
+    const cy = qY[qHead];
+    qHead += 1;
+    visited += 1;
+
+    if (cy <= groundY) continue;
+
+    // ── East predecessor: (cx-1, cy) went east to (cx, cy) ──
+    const epx = cx - 1;
+    if (cy >= groundY && !checkGoesNorth(epx, cy)) {
+      const key = `${epx},${cy}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        qX.push(epx);
+        qY.push(cy);
+        if (cy === groundY) updateGround(epx);
+        else updatePartial(epx, cy);
+      }
+    }
+
+    // ── North predecessor: (cx, cy-1) went north to (cx, cy) ──
+    const npy = cy - 1;
+    if (npy >= groundY && checkGoesNorth(cx, npy) && getNorthStepY(cx, npy) === cy) {
+      const key = `${cx},${npy}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        qX.push(cx);
+        qY.push(npy);
+        if (npy === groundY) updateGround(cx);
+        else updatePartial(cx, npy);
+      }
+    }
+
+    // ── Wraparound predecessor: (cx, cx-1) wrapped north to (cx, 0) ──
+    if (wraparound && cy === 0) {
+      const wy = cx - 1;
+      if (wy >= groundY && checkGoesNorth(cx, wy) && getNorthStepY(cx, wy) === 0) {
+        const key = `${cx},${wy}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          qX.push(cx);
+          qY.push(wy);
+          if (wy === groundY) updateGround(cx);
+          else updatePartial(cx, wy);
+        }
+      }
+    }
+  }
+
+  return bestGround ?? bestPartial ?? target;
+}
+
+// ── Forward path builder ────────────────────────────────────────────────────
+
+/**
+ * Deterministic forward trace from `from` toward `target`, collecting every
+ * visited point.  Returns null only if the trace can't reach `target` within
+ * MAX_PROBE_ITERS steps (should not happen when `from` is a verified
+ * predecessor).
+ */
+function traceForwardPath(
+  from: Point,
+  target: Point,
+  config: BacktraceConfig,
+  linear: LinearTransform | null,
+): Point[] | null {
+  const { checkGoesNorth, getNorthStepY } = config;
+  const points: Point[] = [from];
+  let currX = from.x;
+  let currY = from.y;
+  let steps = 0;
+
+  while (steps < MAX_PROBE_ITERS) {
+    if (currX === target.x && currY === target.y) return points;
+    // Safety: if we've clearly overshot, bail.
+    if (currY > target.y || (currX > target.x + 1 && currY >= target.y)) break;
+
+    if (checkGoesNorth(currX, currY)) {
+      currY = getNorthStepY(currX, currY);
+      points.push({ x: currX, y: currY });
+      steps += 1;
+      continue;
+    }
+
+    // Try optimised east-skip.
+    const skip = eastSkip(currX, currY, config, linear);
+    if (skip !== null && skip > 1) {
+      const nextX = currX + skip;
+
+      // If the target lies on this row within the skip range, land on it directly.
+      if (currY === target.y && target.x > currX && target.x <= nextX) {
+        points.push({ x: target.x, y: currY });
+        return points;
+      }
+
+      currX = nextX;
+      points.push({ x: currX, y: currY });
+      steps += skip;
+      continue;
+    }
+
+    currX += 1;
+    points.push({ x: currX, y: currY });
+    steps += 1;
+  }
+
+  return null; // did not reach target
+}
+
+// ── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * Find the bottommost-rightmost reachable predecessor of `target`.
+ * Ideally this is a ground-row point, but when ground is unreachable the
+ * deepest (lowest y) predecessor found by BFS is returned instead.
+ * Returns `target` itself when target.y ≤ groundRow or no predecessor
+ * exists.
+ */
+export function findGroundPoint(target: Point, config: BacktraceConfig): Point {
+  const groundY = Math.max(1, Math.round(config.groundRow));
+  if (target.y <= groundY) return target;
+
+  // Detect linear transform once for all probes in this call.
+  const linear = config.transform ? detectLinear(config.transform) : null;
+
+  // Binary search works for all deterministic north/east rules.
+  const result = findGroundByBinarySearch(target, groundY, config, linear);
+  if (result) return result;
+
+  // Fallback: BFS reverse — returns bottommost-rightmost reachable
+  // predecessor (may not be at ground row).
+  return findGroundByReverseSearch(target, groundY, config);
+}
+
+/**
+ * Build the full path from `target` back to its bottommost-rightmost
+ * reachable predecessor (ideally at ground row).  Returns an array where
+ * `[0]` = target and `[last]` = the deepest reachable ancestor.
+ */
+export function findPathToGround(target: Point, config: BacktraceConfig): Point[] {
+  const groundY = Math.max(1, Math.round(config.groundRow));
+  if (target.y < groundY) return [target];
+
+  const ground = findGroundPoint(target, config);
+  if (ground.x === target.x && ground.y === target.y) return [target];
+
+  const linear = config.transform ? detectLinear(config.transform) : null;
+
+  // Build forward path ground → target, then reverse so [0] = target.
+  const forward = traceForwardPath(ground, target, config, linear);
+  if (forward) {
+    forward.reverse();
+    return forward;
+  }
+
+  // Forward trace couldn't reach target within the iteration budget.
+  // Return a partial path: just the found predecessor and the target.
+  return [target, ground];
+}
+
+/**
+ * Trace forward from `from` for up to `maxSteps`, returning only the final
+ * position (no intermediate points).
+ */
+export function traceForwardEndpoint(
+  from: Point,
+  maxSteps: number,
+  config: BacktraceConfig,
+): Point {
+  const { checkGoesNorth, getNorthStepY } = config;
+  const linear = config.transform ? detectLinear(config.transform) : null;
+  let currX = from.x;
+  let currY = from.y;
+  let steps = 0;
+  const limit = Math.max(0, Math.floor(maxSteps));
+
+  while (steps < limit) {
+    if (checkGoesNorth(currX, currY)) {
+      const nextY = getNorthStepY(currX, currY);
+      if (nextY === currY) break; // stuck
+      currY = nextY;
+      steps += 1;
+      continue;
+    }
+
+    const skip = eastSkip(currX, currY, config, linear);
+    if (skip !== null && skip > 1) {
+      const bounded = Math.min(skip, limit - steps);
+      currX += bounded;
+      steps += bounded;
+      continue;
+    }
+
+    currX += 1;
+    steps += 1;
+  }
+
+  return { x: currX, y: currY };
+}

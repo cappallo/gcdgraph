@@ -14,11 +14,13 @@ import {
   compileMoveRightPredicate,
   DEFAULT_MOVE_RIGHT_EXPR,
 } from "./utils/moveRule";
+import { findGroundPoint, traceForwardEndpoint, BacktraceConfig } from "./utils/backtrace";
 
 const STORAGE_KEY = "gcdgraph-settings";
 const SETTINGS_SLOTS_KEY = "gcdgraph-settings-slots";
 const DEFAULT_VIEWPORT: Viewport = { x: 12, y: 8, zoom: 45 };
 const DEFAULT_ROW_SHIFT_BOUNDS = { min: -210, max: 210 };
+const MIN_GROUND_ROW = 1;
 const DEFAULT_GROUND_ROW = 2;
 const MAX_HIGHLIGHT_POINTS = 500;
 const MAX_SAVED_NODES = 5000;
@@ -317,10 +319,10 @@ function App() {
       if (Number.isFinite(data.pathStepLimit))
         setPathStepLimit(clampInt(data.pathStepLimit, 10000, 1, 1000000));
       if (Number.isFinite(data.backtraceLimit))
-        setBacktraceLimit(clampInt(data.backtraceLimit, 100000, 1, 1000000));
+        setBacktraceLimit(data.backtraceLimit);
       if (Number.isFinite(data.groundRow))
         setGroundRow(
-          clampInt(data.groundRow, DEFAULT_GROUND_ROW, DEFAULT_GROUND_ROW, 2000)
+          clampInt(data.groundRow, DEFAULT_GROUND_ROW, MIN_GROUND_ROW, 2000)
         );
       if (Array.isArray(data.manualNodes)) {
         const sliced =
@@ -706,235 +708,28 @@ function App() {
         return nextY;
       };
 
-      const traceForwardEnd = (start: Point, maxSteps: number): Point => {
-        let currX = start.x;
-        let currY = start.y;
-        const seen = new Set<string>([pointKey(start)]);
-
-        const canFastForward =
+      const canFastForward =
           moveRightPredicate.isDefaultCoprimeRule === true &&
           (transformFunc.trim().toLowerCase() === "n" ||
             transformFunc.trim().toLowerCase() === "x");
-
-        const stepsLimit = Math.max(0, Math.floor(maxSteps));
-        let stepsUsed = 0;
-
-        while (stepsUsed < stepsLimit) {
-          const goesNorth = checkGoesNorth(currX, currY);
-          if (goesNorth) {
-            const nextY = getNorthStepY(currX, currY);
-            const nextKey = pointKey({ x: currX, y: nextY });
-            if (seen.has(nextKey)) break;
-            currY = nextY;
-            stepsUsed += 1;
-            seen.add(nextKey);
-            continue;
-          }
-
-          const p = Math.abs(currY);
-          const canJump = canFastForward && isPrime(p) && p > 1;
-          if (!canJump) {
-            currX += 1;
-            stepsUsed += 1;
-            continue;
-          }
-
-          const effectiveX = getEffectiveX(currX, currY);
-          const rem = ((effectiveX % p) + p) % p;
-          const jump = rem === 0 ? 1 : Math.min(p - rem, stepsLimit - stepsUsed);
-
-          currX += jump;
-          stepsUsed += jump;
-        }
-
-        return { x: currX, y: currY };
-      };
 
       const groundY = clampInt(
         groundRow,
         DEFAULT_GROUND_ROW,
-        DEFAULT_GROUND_ROW,
+        MIN_GROUND_ROW,
         2000
       );
 
-      const findBottommostRightmostByReverseSearch = (target: Point): Point => {
-        if (target.y < groundY) return target;
-
-        const targetKey = pointKey(target);
-        const seen = new Set<string>([targetKey]);
-        const queue: Point[] = [target];
-        let qHead = 0;
-        let visited = 0;
-        const maxVisited = Math.max(1, Math.floor(backtraceLimit));
-        let best: Point | null = target.y === groundY ? target : null;
-
-        while (qHead < queue.length && visited < maxVisited) {
-          const curr = queue[qHead++];
-          visited += 1;
-
-          if (curr.y <= groundY) continue;
-
-          const predecessors: Point[] = [
-            { x: curr.x - 1, y: curr.y },
-            { x: curr.x, y: curr.y - 1 },
-          ];
-          if (wraparound && curr.y === 0) {
-            predecessors.push({ x: curr.x, y: curr.x - 1 });
-          }
-
-          for (const pred of predecessors) {
-            if (pred.y < groundY) continue;
-
-            const eastHits =
-              pred.y === curr.y &&
-              pred.x + 1 === curr.x &&
-              !checkGoesNorth(pred.x, pred.y);
-            const northHits =
-              pred.x === curr.x &&
-              checkGoesNorth(pred.x, pred.y) &&
-              getNorthStepY(pred.x, pred.y) === curr.y;
-
-            if (!eastHits && !northHits) continue;
-
-            const key = pointKey(pred);
-            if (seen.has(key)) continue;
-            seen.add(key);
-            queue.push(pred);
-
-            if (
-              pred.y === groundY &&
-              (best === null || pred.x > best.x)
-            ) {
-              best = pred;
-            }
-          }
-        }
-
-        return best ?? target;
-      };
-
-      const findBottommostRightmostPredecessor = (target: Point): Point => {
-        // Fast method: search for the rightmost x on the computed ground row whose forward path reaches `target`.
-        // This avoids exploring the enormous reverse-reachable set.
-        if (target.y < groundY) return target;
-
-        const canFastForward =
-          moveRightPredicate.isDefaultCoprimeRule === true &&
-          (transformFunc.trim().toLowerCase() === "n" ||
-            transformFunc.trim().toLowerCase() === "x");
-
-        if (!canFastForward) {
-          return findBottommostRightmostByReverseSearch(target);
-        }
-
-        type Outcome = "hit" | "tooLeft" | "tooRight";
-
-        const outcomeFromStartX = (startX: number): Outcome => {
-          let currX = startX;
-          let currY = groundY;
-          let lastXAtTargetRow: number | null = null;
-          const seen = new Set<string>([pointKey({ x: currX, y: currY })]);
-
-          // Hard cap to prevent pathological loops.
-          const maxIters = 5_000_000;
-          let iters = 0;
-
-          while (iters < maxIters) {
-            if (currX === target.x && currY === target.y) return "hit";
-            if (currY === target.y) lastXAtTargetRow = currX;
-
-            // If we've already passed the target row without hitting.
-            if (currY > target.y) break;
-
-            // If we overshoot target x on or before the target row, we can't ever hit it.
-            if (currX > target.x && currY <= target.y) return "tooRight";
-
-            const goesNorth = checkGoesNorth(currX, currY);
-            if (goesNorth) {
-              const nextY = getNorthStepY(currX, currY);
-              const nextKey = pointKey({ x: currX, y: nextY });
-              if (seen.has(nextKey)) break;
-              currY = nextY;
-              iters += 1;
-              seen.add(nextKey);
-              continue;
-            }
-
-            const p = Math.abs(currY);
-            const canJump = canFastForward && isPrime(p) && p > 1;
-            if (!canJump) {
-              currX += 1;
-              iters += 1;
-              continue;
-            }
-
-            const effectiveX = getEffectiveX(currX, currY);
-            const rem = ((effectiveX % p) + p) % p;
-            const jump = rem === 0 ? 1 : p - rem;
-            const nextX = currX + jump;
-
-            // If we pass through the target on the target row during the jump, we hit it.
-            if (
-              currY === target.y &&
-              target.x > currX &&
-              target.x <= nextX
-            ) {
-              return "hit";
-            }
-
-            // If we pass target.x+1 before reaching the target row, we're too far right.
-            if (
-              currY < target.y &&
-              target.x + 1 > currX &&
-              target.x + 1 <= nextX
-            ) {
-              return "tooRight";
-            }
-
-            currX = nextX;
-            iters += jump;
-            seen.add(pointKey({ x: currX, y: currY }));
-          }
-
-          if (lastXAtTargetRow === null) return "tooLeft";
-          if (lastXAtTargetRow < target.x) return "tooLeft";
-          if (lastXAtTargetRow > target.x) return "tooRight";
-          return "hit";
-        };
-
-        const maxX = Math.floor(target.x);
-        const minX = maxX - 1_000_000_000;
-
-        let probe = maxX;
-        let step = 1;
-        while (probe > minX && outcomeFromStartX(probe) === "tooRight") {
-          probe = maxX - step;
-          step *= 2;
-        }
-        const lowBound = Math.max(minX, probe);
-
-        let lo = lowBound;
-        let hi = maxX;
-        let bestHit: number | null = null;
-
-        while (lo <= hi) {
-          const mid = Math.floor((lo + hi) / 2);
-          const out = outcomeFromStartX(mid);
-          if (out === "tooLeft") {
-            lo = mid + 1;
-            continue;
-          }
-          if (out === "tooRight") {
-            hi = mid - 1;
-            continue;
-          }
-          bestHit = mid;
-          lo = mid + 1;
-        }
-
-        return bestHit === null
-          ? findBottommostRightmostByReverseSearch(target)
-          : { x: bestHit, y: groundY };
+      const btConfig: BacktraceConfig = {
+        checkGoesNorth,
+        getNorthStepY,
+        getEffectiveX,
+        groundRow: groundY,
+        backtraceLimit,
+        canFastForward,
+        wraparound,
+        transform: (n: number) => Math.round(activeTransform(n)),
+        isDefaultCoprimeRule: Boolean(moveRightPredicate.isDefaultCoprimeRule),
       };
 
       const nextAutoPoints =
@@ -943,9 +738,9 @@ function App() {
           : autoHighlightGoToGround
           ? dedupePoints(
               result.points.map((start) => {
-                if (start.y <= 1) return start;
-                const end = traceForwardEnd(start, 1000);
-                return findBottommostRightmostPredecessor(end);
+                if (start.y <= groundY) return start;
+                const end = traceForwardEndpoint(start, 1000, btConfig);
+                return findGroundPoint(end, btConfig);
               })
             )
           : result.points;
@@ -1020,15 +815,14 @@ function App() {
   );
 
   const handleBacktraceLimit = useCallback(
-    (val: number) =>
-      setBacktraceLimit(clampInt(val, backtraceLimit, 1, 1000000)),
-    [backtraceLimit]
+    (val: number) => setBacktraceLimit(val),
+    []
   );
 
   const handleGroundRow = useCallback(
     (val: number) =>
       setGroundRow(
-        clampInt(val, groundRow, DEFAULT_GROUND_ROW, 2000)
+        clampInt(val, groundRow, MIN_GROUND_ROW, 2000)
       ),
     [groundRow]
   );

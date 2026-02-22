@@ -3,6 +3,7 @@ import { gcd, gcdBigInt, gcdIsOneBigInt, formatValue, createTransformFunction, g
 import { Viewport, Point, Theme } from '../types';
 import { getRowShiftMagnitude } from '../utils/grid';
 import { MovePredicate } from '../utils/moveRule';
+import { findPathToGround, BacktraceConfig } from '../utils/backtrace';
 
 interface InfiniteGraphProps {
   viewport: Viewport;
@@ -418,240 +419,19 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     [wraparound]
   );
 
-  const findPathToBottommostRightmost = useCallback((start: Point): Point[] => {
-    const groundY = Math.max(2, Math.round(groundRow));
-    if (start.y < groundY) return [start];
-
-    const findPathByReverseSearch = (): Point[] => {
-      const startKey = `${start.x},${start.y}`;
-      const seen = new Set<string>([startKey]);
-      const queue: string[] = [startKey];
-      const pointByKey = new Map<string, Point>([[startKey, start]]);
-      const parent = new Map<string, string>();
-      let qHead = 0;
-      let visited = 0;
-      const maxVisited = Math.max(1, Math.floor(backtraceLimit));
-      let bestGroundKey: string | null = start.y === groundY ? startKey : null;
-
-      while (qHead < queue.length && visited < maxVisited) {
-        const currKey = queue[qHead++];
-        const curr = pointByKey.get(currKey);
-        if (!curr) continue;
-        visited += 1;
-
-        if (curr.y <= groundY) continue;
-
-        const predecessors: Point[] = [
-          { x: curr.x - 1, y: curr.y },
-          { x: curr.x, y: curr.y - 1 },
-        ];
-        if (wraparound && curr.y === 0) {
-          predecessors.push({ x: curr.x, y: curr.x - 1 });
-        }
-
-        for (const pred of predecessors) {
-          if (pred.y < groundY) continue;
-
-          const eastHits =
-            pred.y === curr.y &&
-            pred.x + 1 === curr.x &&
-            !checkGoesNorth(pred.x, pred.y);
-          const northHits =
-            pred.x === curr.x &&
-            checkGoesNorth(pred.x, pred.y) &&
-            getNorthStepY(pred.x, pred.y) === curr.y;
-
-          if (!eastHits && !northHits) continue;
-
-          const predKey = `${pred.x},${pred.y}`;
-          if (seen.has(predKey)) continue;
-          seen.add(predKey);
-          pointByKey.set(predKey, pred);
-          parent.set(predKey, currKey);
-          queue.push(predKey);
-
-          if (pred.y === groundY) {
-            const bestPoint = bestGroundKey ? pointByKey.get(bestGroundKey) : null;
-            if (!bestPoint || pred.x > bestPoint.x) {
-              bestGroundKey = predKey;
-            }
-          }
-        }
-      }
-
-      if (!bestGroundKey) return [start];
-
-      const chain: Point[] = [];
-      let key: string | undefined = bestGroundKey;
-      while (key) {
-        const p = pointByKey.get(key);
-        if (!p) break;
-        chain.push(p);
-        if (key === startKey) break;
-        key = parent.get(key);
-      }
-
-      const last = chain[chain.length - 1];
-      if (!last || last.x !== start.x || last.y !== start.y) return [start];
-
-      // UI expects tracedPath[0] === clicked node, and last === chosen ground.
-      return chain.reverse();
-    };
-
-    if (!canFastForward) {
-      return findPathByReverseSearch();
-    }
-
-    type Outcome = 'hit' | 'tooLeft' | 'tooRight';
-
-    const outcomeFromStartX = (startX: number): Outcome => {
-      let currX = startX;
-      let currY = groundY;
-      let lastXAtTargetRow: number | null = null;
-      const seen = new Set<string>([`${currX},${currY}`]);
-
-      const maxIters = 5_000_000;
-      let iters = 0;
-
-      while (iters < maxIters) {
-        if (currX === start.x && currY === start.y) return 'hit';
-        if (currY === start.y) lastXAtTargetRow = currX;
-        if (currY > start.y) break;
-        if (currX > start.x && currY <= start.y) return 'tooRight';
-
-        const goesNorth = checkGoesNorth(currX, currY);
-        if (goesNorth) {
-          const nextY = getNorthStepY(currX, currY);
-          const nextKey = `${currX},${nextY}`;
-          if (seen.has(nextKey)) break;
-          currY = nextY;
-          iters += 1;
-          seen.add(nextKey);
-          continue;
-        }
-
-        const p = Math.abs(currY);
-        const canJump = canFastForward && isPrime(p) && p > 1;
-        if (!canJump) {
-          currX += 1;
-          iters += 1;
-          continue;
-        }
-
-        const effectiveX = getEffectiveX(currX, currY);
-        const rem = ((effectiveX % p) + p) % p;
-        const jump = rem === 0 ? 1 : p - rem;
-        const nextX = currX + jump;
-
-        // If we pass through the target on the target row during the jump, we hit.
-        if (currY === start.y && start.x > currX && start.x <= nextX) return 'hit';
-
-        // If we pass x+1 before reaching the target row, we're too far right.
-        if (currY < start.y && start.x + 1 > currX && start.x + 1 <= nextX) return 'tooRight';
-
-        currX = nextX;
-        iters += jump;
-        seen.add(`${currX},${currY}`);
-      }
-
-      if (lastXAtTargetRow === null) return 'tooLeft';
-      if (lastXAtTargetRow < start.x) return 'tooLeft';
-      if (lastXAtTargetRow > start.x) return 'tooRight';
-      return 'hit';
-    };
-
-    const traceForwardToTarget = (from: Point, target: Point): Point[] | null => {
-      const points: Point[] = [from];
-      let currX = from.x;
-      let currY = from.y;
-      const seen = new Set<string>([`${currX},${currY}`]);
-      const maxIters = 5_000_000;
-      let iters = 0;
-
-      while (iters < maxIters && currY <= target.y && currX <= target.x + 1) {
-        if (currX === target.x && currY === target.y) return points;
-
-        const goesNorth = checkGoesNorth(currX, currY);
-        if (goesNorth) {
-          const nextY = getNorthStepY(currX, currY);
-          const nextKey = `${currX},${nextY}`;
-          if (seen.has(nextKey)) break;
-          currY = nextY;
-          points.push({ x: currX, y: currY });
-          iters += 1;
-          seen.add(nextKey);
-          continue;
-        }
-
-        const p = Math.abs(currY);
-        const canJump = canFastForward && isPrime(p) && p > 1;
-        if (!canJump) {
-          currX += 1;
-          points.push({ x: currX, y: currY });
-          iters += 1;
-          continue;
-        }
-
-        const effectiveX = getEffectiveX(currX, currY);
-        const rem = ((effectiveX % p) + p) % p;
-        const jump = rem === 0 ? 1 : p - rem;
-        const nextX = currX + jump;
-
-        // If we pass through the target on this row, include it and stop.
-        if (currY === target.y && target.x > currX && target.x <= nextX) {
-          points.push({ x: target.x, y: currY });
-          return points;
-        }
-
-        currX = nextX;
-        const nextKey = `${currX},${currY}`;
-        if (seen.has(nextKey)) break;
-        points.push({ x: currX, y: currY });
-        iters += jump;
-        seen.add(nextKey);
-      }
-
-      return null;
-    };
-
-    const maxX = Math.floor(start.x);
-    const minX = maxX - 1_000_000_000;
-    let probeX = maxX;
-    let step = 1;
-    while (probeX > minX && outcomeFromStartX(probeX) === 'tooRight') {
-      probeX = maxX - step;
-      step *= 2;
-    }
-    const lowBound = Math.max(minX, probeX);
-
-    let lo = lowBound;
-    let hi = maxX;
-    let bestHit: number | null = null;
-
-    while (lo <= hi) {
-      const mid = Math.floor((lo + hi) / 2);
-      const out = outcomeFromStartX(mid);
-      if (out === 'tooLeft') {
-        lo = mid + 1;
-        continue;
-      }
-      if (out === 'tooRight') {
-        hi = mid - 1;
-        continue;
-      }
-      bestHit = mid;
-      lo = mid + 1;
-    }
-
-    if (bestHit === null) return findPathByReverseSearch();
-
-    const ground = { x: bestHit, y: groundY };
-    const forward = traceForwardToTarget(ground, start);
-    if (!forward) return findPathByReverseSearch();
-
-    // UI expects tracedPath[0] === clicked node, and last === chosen ground.
-    return forward.slice().reverse();
-  }, [backtraceLimit, checkGoesNorth, canFastForward, getEffectiveX, getNorthStepY, groundRow, wraparound]);
+  // Backtrace configuration, memoised so the effect below reruns only when
+  // relevant inputs actually change.
+  const backtraceConfig: BacktraceConfig = useMemo(() => ({
+    checkGoesNorth,
+    getNorthStepY,
+    getEffectiveX,
+    groundRow,
+    backtraceLimit,
+    canFastForward,
+    wraparound,
+    transform: (n: number) => Math.round(activeTransform(n)),
+    isDefaultCoprimeRule: Boolean(moveRightPredicate.isDefaultCoprimeRule),
+  }), [checkGoesNorth, getNorthStepY, getEffectiveX, groundRow, backtraceLimit, canFastForward, wraparound, activeTransform, moveRightPredicate.isDefaultCoprimeRule]);
 
   // If the user changes the move rule / transform / row-shift while a backtrace is visible,
   // recompute it so it stays consistent with the new evaluation.
@@ -660,8 +440,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       setTracedPath(null);
       return;
     }
-    setTracedPath(findPathToBottommostRightmost(tracedAnchor.current));
-  }, [findPathToBottommostRightmost, moveRightPredicate, transformFunc, rowShift, randomizeShift, wraparound]);
+    setTracedPath(findPathToGround(tracedAnchor.current, backtraceConfig));
+  }, [backtraceConfig, moveRightPredicate, transformFunc, rowShift, randomizeShift, wraparound]);
 
   // Helper to trace a path forward from a given point
   const traceForward = useCallback((startX: number, startY: number) => {
@@ -1422,7 +1202,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       return;
     }
 
-    const path = findPathToBottommostRightmost({ x: gx, y: gy });
+    const path = findPathToGround({ x: gx, y: gy }, backtraceConfig);
     tracedAnchor.current = { x: gx, y: gy };
     setTracedPath(path);
   };
