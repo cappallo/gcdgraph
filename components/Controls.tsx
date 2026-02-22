@@ -66,6 +66,8 @@ interface ControlsProps {
   setPathStepLimit: (n: number) => void;
   backtraceLimit: number;
   setBacktraceLimit: (n: number) => void;
+  groundRow: number;
+  setGroundRow: (n: number) => void;
   backtrailLength: number | null;
   savedSlots: SavedSlotSummary[];
   onSaveSlot: (description: string) => void;
@@ -113,6 +115,8 @@ const Controls: React.FC<ControlsProps> = ({
   setPathStepLimit,
   backtraceLimit,
   setBacktraceLimit,
+  groundRow,
+  setGroundRow,
   backtrailLength,
   savedSlots,
   onSaveSlot,
@@ -138,6 +142,7 @@ const Controls: React.FC<ControlsProps> = ({
   const [backtraceLimitInput, setBacktraceLimitInput] = useState(
     backtraceLimit.toString()
   );
+  const [groundRowInput, setGroundRowInput] = useState(groundRow.toString());
   const [rowShiftMinInput, setRowShiftMinInput] = useState(
     rowShiftBounds.min.toString()
   );
@@ -169,6 +174,9 @@ const Controls: React.FC<ControlsProps> = ({
   useEffect(() => {
     setBacktraceLimitInput(backtraceLimit.toString());
   }, [backtraceLimit]);
+  useEffect(() => {
+    setGroundRowInput(groundRow.toString());
+  }, [groundRow]);
   useEffect(() => {
     setRowShiftMinInput(rowShiftBounds.min.toString());
     setRowShiftMaxInput(rowShiftBounds.max.toString());
@@ -267,6 +275,15 @@ const Controls: React.FC<ControlsProps> = ({
       setBacktraceLimit(num);
     } else {
       setBacktraceLimitInput(backtraceLimit.toString());
+    }
+  };
+
+  const commitGroundRow = () => {
+    const num = Number(groundRowInput);
+    if (Number.isFinite(num)) {
+      setGroundRow(num);
+    } else {
+      setGroundRowInput(groundRow.toString());
     }
   };
 
@@ -582,11 +599,11 @@ const Controls: React.FC<ControlsProps> = ({
                 onBlur={commitMoveRight}
                 onKeyDown={handleMoveRightKeyDown}
                 className={`w-full px-2 py-1 text-sm rounded border outline-none font-mono ${inputClass}`}
-                placeholder="e.g. gcd(x+y,y)>1 || lpf(gcd(x,y))==1"
-                title="Supports: comparisons (==, !=, <, <=, >, >=), logic (&&, ||, !), +, -, *, /, ^, gcd(a,b), spf(n)/lpf(n), gpf(n), fib(n), fact(n), prime(n), primepower(n), pi(n), sign(n), sin, cos, tan, log, sqrt, abs, floor, ceil, round, exp"
+                placeholder="e.g. gcd(f(x),f(y))==1 || isprime(x)==1"
+                title="Supports: comparisons (==, !=, <, <=, >, >=), logic (&&, ||, !), +, -, *, /, ^, f(expr), gcd(a,b), spf(n)/lpf(n), gpf(n), fib(n), fact(n), prime(n), primepower(n), pi(n), sign(n), sin, cos, tan, log, sqrt, abs, floor, ceil, round, exp"
               />
               <p className="text-[10px] opacity-60 mt-1">
-                Variables x,y are after transform f(n) + row shift.
+                Variables x,y are pre-transform (with row shift applied). Use f(expr) to apply transform.
               </p>
               {moveRightError && (
                 <p className="text-[10px] text-red-400 mt-1">
@@ -884,7 +901,7 @@ const Controls: React.FC<ControlsProps> = ({
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
+                    <div className="col-span-2">
                       <label
                         className={`block text-xs font-medium mb-1 ${
                           isDark ? "text-gray-400" : "text-gray-500"
@@ -926,6 +943,28 @@ const Controls: React.FC<ControlsProps> = ({
                       />
                       <p className="text-[10px] opacity-60 mt-1">
                         Steps searched when tracing to the origin.
+                      </p>
+                    </div>
+                    <div>
+                      <label
+                        className={`block text-xs font-medium mb-1 ${
+                          isDark ? "text-gray-400" : "text-gray-500"
+                        }`}
+                      >
+                        Ground row
+                      </label>
+                      <input
+                        type="number"
+                        value={groundRowInput}
+                        onChange={(e) => setGroundRowInput(e.target.value)}
+                        onBlur={commitGroundRow}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" && commitGroundRow()
+                        }
+                        className={`w-full px-2 py-1 rounded border ${inputClass} text-sm`}
+                      />
+                      <p className="text-[10px] opacity-60 mt-1">
+                        Row targeted by Go to ground/backtrace.
                       </p>
                     </div>
                   </div>

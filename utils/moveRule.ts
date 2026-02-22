@@ -1,6 +1,8 @@
 import { gcd, getSmallestPrimeFactor, isPrime, nthPrime, nthPrimePower, primePi } from './math';
 
-export type MovePredicate = ((x: number, y: number) => boolean) & {
+type TransformApplyFn = (value: number) => number;
+
+export type MovePredicate = ((x: number, y: number, applyTransform?: TransformApplyFn) => boolean) & {
   isDefaultCoprimeRule?: boolean;
 };
 
@@ -58,6 +60,19 @@ const getGreatestPrimeFactor = (n: number): number => {
 
 const fibCache = new Map<number, number>();
 const fibBigCache = new Map<bigint, bigint>();
+const prime01Cache = new Map<number, number>();
+const PRIME01_CACHE_LIMIT = 50_000;
+
+const isPrime01 = (v: number): number => {
+  const rounded = Math.round(v);
+  if (!Number.isFinite(rounded)) return 0;
+  const cached = prime01Cache.get(rounded);
+  if (cached !== undefined) return cached;
+  const out = isPrime(rounded) ? 1 : 0;
+  if (prime01Cache.size >= PRIME01_CACHE_LIMIT) prime01Cache.clear();
+  prime01Cache.set(rounded, out);
+  return out;
+};
 
 // Fast-doubling Fibonacci (BigInt) for exact intermediate computation.
 const fibPair = (n: bigint): [bigint, bigint] => {
@@ -368,17 +383,17 @@ class Parser {
   }
 }
 
-const evalNum = (node: NumNode, x: number, y: number): number => {
+const evalNum = (node: NumNode, x: number, y: number, applyTransform?: TransformApplyFn): number => {
   switch (node.kind) {
     case 'num':
       return node.value;
     case 'var':
       return node.name === 'x' ? x : y;
     case 'unary':
-      return -evalNum(node.expr, x, y);
+      return -evalNum(node.expr, x, y, applyTransform);
     case 'binary': {
-      const a = evalNum(node.left, x, y);
-      const b = evalNum(node.right, x, y);
+      const a = evalNum(node.left, x, y, applyTransform);
+      const b = evalNum(node.right, x, y, applyTransform);
       switch (node.op) {
         case '+':
           return a + b;
@@ -387,16 +402,16 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
         case '*':
           return a * b;
         case '/':
-          return b === 0 ? Infinity : a / b;
+          return b === 0 ? NaN : a / b;
         case '%':
-          return b === 0 ? Infinity : a % b;
+          return b === 0 ? NaN : a % b;
         case '^':
           return Math.pow(a, b);
       }
       return NaN;
     }
     case 'call': {
-      const args = node.args.map((n) => evalNum(n, x, y));
+      const args = node.args.map((n) => evalNum(n, x, y, applyTransform));
       const name = node.name;
 
       const unaryMath: Record<string, (v: number) => number> = {
@@ -416,7 +431,7 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
         prime: nthPrime,
         primepower: nthPrimePower,
         pi: primePi,
-        isprime: (v) => (isPrime(Math.round(v)) ? 1 : 0)
+        isprime: isPrime01
       };
 
       if (unaryMath[name]) {
@@ -440,7 +455,12 @@ const evalNum = (node: NumNode, x: number, y: number): number => {
         if (args.length !== 2) throw new ParseError('mod() takes 2 arguments.');
         const a = args[0]!;
         const b = args[1]!;
-        return b === 0 ? Infinity : a % b;
+        return b === 0 ? NaN : a % b;
+      }
+      if (name === 'f') {
+        if (args.length !== 1) throw new ParseError('f() takes 1 argument.');
+        if (!applyTransform) return args[0]!;
+        return applyTransform(args[0]!);
       }
 
       throw new ParseError(`Unknown function '${name}()'.`);
@@ -471,6 +491,7 @@ const validateNum = (node: NumNode): void => {
       unaryMath.add('primepower');
       unaryMath.add('pi');
       unaryMath.add('isprime');
+      unaryMath.add('f');
       if (unaryMath.has(name)) {
         if (argc !== 1) throw new ParseError(`${name}() takes 1 argument.`);
         return;
@@ -515,19 +536,19 @@ const validateBool = (node: BoolNode): void => {
   }
 };
 
-const evalBool = (node: BoolNode, x: number, y: number): boolean => {
+const evalBool = (node: BoolNode, x: number, y: number, applyTransform?: TransformApplyFn): boolean => {
   switch (node.kind) {
     case 'bool':
       return node.value;
     case 'not':
-      return !evalBool(node.expr, x, y);
+      return !evalBool(node.expr, x, y, applyTransform);
     case 'logic':
       return node.op === '&&'
-        ? evalBool(node.left, x, y) && evalBool(node.right, x, y)
-        : evalBool(node.left, x, y) || evalBool(node.right, x, y);
+        ? evalBool(node.left, x, y, applyTransform) && evalBool(node.right, x, y, applyTransform)
+        : evalBool(node.left, x, y, applyTransform) || evalBool(node.right, x, y, applyTransform);
     case 'cmp': {
-      const a = evalNum(node.left, x, y);
-      const b = evalNum(node.right, x, y);
+      const a = evalNum(node.left, x, y, applyTransform);
+      const b = evalNum(node.right, x, y, applyTransform);
       switch (node.op) {
         case '==':
           return a === b;
@@ -559,9 +580,9 @@ export const compileMoveRightPredicate = (
     const ast = parser.parseBoolRoot();
     validateBool(ast);
     const isDefault = src === DEFAULT_MOVE_RIGHT_EXPR;
-    const predicate: MovePredicate = (x, y) => {
+    const predicate: MovePredicate = (x, y, applyTransform) => {
       try {
-        return !!evalBool(ast, x, y);
+        return !!evalBool(ast, x, y, applyTransform);
       } catch {
         return gcd(Math.round(x), Math.round(y)) === 1;
       }

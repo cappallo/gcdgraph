@@ -94,7 +94,8 @@ export const getPrimeFactorCount = (n: number): number => {
 };
 
 export const isPrime = (n: number): boolean => {
-  n = Math.abs(n);
+  if (!Number.isFinite(n)) return false;
+  n = Math.floor(Math.abs(n));
   if (n <= 1) return false;
   return getSmallestPrimeFactor(n) === n;
 };
@@ -555,10 +556,12 @@ export const createTransformFunction = (
             stack.push(a * b);
             break;
           case "/":
-            stack.push(b === 0 ? Infinity : a / b);
+            if (b === 0) return null;
+            stack.push(a / b);
             break;
           case "%":
-            stack.push(b === 0 ? Infinity : a % b);
+            if (b === 0) return null;
+            stack.push(a % b);
             break;
           case "^":
             // Use BigInt for integer powers to maintain precision beyond 2^53
@@ -594,7 +597,7 @@ export const createTransformFunction = (
         stack.push(fn(a));
       }
     }
-    if (stack.length !== 1 || Number.isNaN(stack[0])) return null;
+    if (stack.length !== 1 || !Number.isFinite(stack[0])) return null;
     return stack[0];
   };
 

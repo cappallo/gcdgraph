@@ -22,6 +22,7 @@ interface InfiniteGraphProps {
   onTogglePathStart: (p: Point) => void;
   pathStepLimit: number;
   backtraceLimit: number;
+  groundRow: number;
   onBacktrailChange?: (len: number | null) => void;
 }
 
@@ -207,6 +208,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   onTogglePathStart,
   pathStepLimit,
   backtraceLimit,
+  groundRow,
   onBacktrailChange
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -385,6 +387,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   // Logic helper: Determine direction based on Coprime rule + Row Shift
   const checkGoesNorth = useCallback((gx: number, gy: number) => {
     const effectiveX = getEffectiveX(gx, gy);
+    const rawX = Math.round(effectiveX);
+    const rawY = Math.round(gy);
 
     // Try BigInt-precise path for the default coprime rule.
     const isCoprime = computeBigIsCoprime(gx, gy);
@@ -399,7 +403,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     // Rule: "move right" predicate -> East (return false)
     //       otherwise -> North (return true)
     try {
-      return !moveRightPredicate(vX, vY);
+      return !moveRightPredicate(rawX, rawY, activeTransform);
     } catch {
       return gcd(vX, vY) !== 1;
     }
@@ -408,60 +412,95 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   const getNorthStepY = useCallback(
     (currX: number, currY: number) => {
       const nextY = currY + 1;
-      if (wraparound && nextY === currX) return 2;
+      if (wraparound && nextY === currX) return 0;
       return nextY;
     },
     [wraparound]
   );
 
   const findPathToBottommostRightmost = useCallback((start: Point): Point[] => {
-    // Fast alternative to reverse BFS: search for the rightmost x on a computed "ground" row
-    // whose forward path reaches `start`, then trace forward to reconstruct.
-    const traceForwardEnd = (from: Point, maxSteps: number): Point => {
-      let currX = from.x;
-      let currY = from.y;
-      const seen = new Set<string>([`${currX},${currY}`]);
+    const groundY = Math.max(2, Math.round(groundRow));
+    if (start.y < groundY) return [start];
 
-      const stepsLimit = Math.max(0, Math.floor(maxSteps));
-      let stepsUsed = 0;
+    const findPathByReverseSearch = (): Point[] => {
+      const startKey = `${start.x},${start.y}`;
+      const seen = new Set<string>([startKey]);
+      const queue: string[] = [startKey];
+      const pointByKey = new Map<string, Point>([[startKey, start]]);
+      const parent = new Map<string, string>();
+      let qHead = 0;
+      let visited = 0;
+      const maxVisited = Math.max(1, Math.floor(backtraceLimit));
+      let bestGroundKey: string | null = start.y === groundY ? startKey : null;
 
-      while (stepsUsed < stepsLimit) {
-        const goesNorth = checkGoesNorth(currX, currY);
-        if (goesNorth) {
-          const nextY = getNorthStepY(currX, currY);
-          const nextKey = `${currX},${nextY}`;
-          if (seen.has(nextKey)) break;
-          currY = nextY;
-          stepsUsed += 1;
-          seen.add(nextKey);
-          continue;
+      while (qHead < queue.length && visited < maxVisited) {
+        const currKey = queue[qHead++];
+        const curr = pointByKey.get(currKey);
+        if (!curr) continue;
+        visited += 1;
+
+        if (curr.y <= groundY) continue;
+
+        const predecessors: Point[] = [
+          { x: curr.x - 1, y: curr.y },
+          { x: curr.x, y: curr.y - 1 },
+        ];
+        if (wraparound && curr.y === 0) {
+          predecessors.push({ x: curr.x, y: curr.x - 1 });
         }
 
-        const p = Math.abs(currY);
-        const canJump = canFastForward && isPrime(p) && p > 1;
-        if (!canJump) {
-          currX += 1;
-          stepsUsed += 1;
-          continue;
+        for (const pred of predecessors) {
+          if (pred.y < groundY) continue;
+
+          const eastHits =
+            pred.y === curr.y &&
+            pred.x + 1 === curr.x &&
+            !checkGoesNorth(pred.x, pred.y);
+          const northHits =
+            pred.x === curr.x &&
+            checkGoesNorth(pred.x, pred.y) &&
+            getNorthStepY(pred.x, pred.y) === curr.y;
+
+          if (!eastHits && !northHits) continue;
+
+          const predKey = `${pred.x},${pred.y}`;
+          if (seen.has(predKey)) continue;
+          seen.add(predKey);
+          pointByKey.set(predKey, pred);
+          parent.set(predKey, currKey);
+          queue.push(predKey);
+
+          if (pred.y === groundY) {
+            const bestPoint = bestGroundKey ? pointByKey.get(bestGroundKey) : null;
+            if (!bestPoint || pred.x > bestPoint.x) {
+              bestGroundKey = predKey;
+            }
+          }
         }
-
-        const effectiveX = getEffectiveX(currX, currY);
-        const rem = ((effectiveX % p) + p) % p;
-        const jump = rem === 0 ? 1 : Math.min(p - rem, stepsLimit - stepsUsed);
-
-        currX += jump;
-        stepsUsed += jump;
       }
 
-      return { x: currX, y: currY };
+      if (!bestGroundKey) return [start];
+
+      const chain: Point[] = [];
+      let key: string | undefined = bestGroundKey;
+      while (key) {
+        const p = pointByKey.get(key);
+        if (!p) break;
+        chain.push(p);
+        if (key === startKey) break;
+        key = parent.get(key);
+      }
+
+      const last = chain[chain.length - 1];
+      if (!last || last.x !== start.x || last.y !== start.y) return [start];
+
+      // UI expects tracedPath[0] === clicked node, and last === chosen ground.
+      return chain.reverse();
     };
 
-    if (start.y <= 1) return [start];
-
-    const groundProbe = traceForwardEnd({ x: 100, y: 0 }, 100);
-    const groundY = groundProbe.y + 1;
-
-    if (start.y < groundY) return [start];
+    if (!canFastForward) {
+      return findPathByReverseSearch();
+    }
 
     type Outcome = 'hit' | 'tooLeft' | 'tooRight';
 
@@ -604,15 +643,15 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       lo = mid + 1;
     }
 
-    if (bestHit === null) return [start];
+    if (bestHit === null) return findPathByReverseSearch();
 
     const ground = { x: bestHit, y: groundY };
     const forward = traceForwardToTarget(ground, start);
-    if (!forward) return [start];
+    if (!forward) return findPathByReverseSearch();
 
     // UI expects tracedPath[0] === clicked node, and last === chosen ground.
     return forward.slice().reverse();
-  }, [checkGoesNorth, canFastForward, getEffectiveX, getNorthStepY]);
+  }, [backtraceLimit, checkGoesNorth, canFastForward, getEffectiveX, getNorthStepY, groundRow, wraparound]);
 
   // If the user changes the move rule / transform / row-shift while a backtrace is visible,
   // recompute it so it stays consistent with the new evaluation.
@@ -805,7 +844,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
           goesNorth = !isCoprime;
         } else {
           try {
-            goesNorth = !moveRightPredicate(vX, vY);
+            goesNorth = !moveRightPredicate(Math.round(effectiveX), Math.round(gy), activeTransform);
           } catch {
             goesNorth = displayVal !== 1;
           }
