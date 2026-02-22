@@ -6,7 +6,7 @@
  *  - App auto-highlight go-to-ground (ground point only)
  */
 import { Point } from '../types';
-import { isPrime, getSmallestPrimeFactor } from './math';
+import { getSmallestPrimeFactor } from './math';
 
 export interface BacktraceConfig {
   /** Returns true if the point steps north, false if it steps east. */
@@ -127,9 +127,35 @@ function linearEastSkip(
 }
 
 /**
+ * Threshold for full root enumeration of f(t) ≡ 0 (mod p).
+ * For primes ≤ this value we scan all residues; for larger primes we
+ * use only the known root y % p (since p | f(y) ⇒ f(y%p) ≡ 0 mod p).
+ */
+const GENERAL_ROOT_THRESHOLD = 10_000;
+
+/** Module-level root cache: maps prime → sorted array of roots of f mod p. */
+let _rootCacheTransform: ((n: number) => number) | null = null;
+let _rootCache: Map<number, number[]> = new Map();
+
+function getRootCache(transform: (n: number) => number): Map<number, number[]> {
+  if (transform !== _rootCacheTransform) {
+    _rootCacheTransform = transform;
+    _rootCache = new Map();
+  }
+  return _rootCache;
+}
+
+/**
  * For the default coprime rule with a NON-LINEAR transform:
- * Scan delta = 1..q for each prime factor q of |f(y)|, checking
- * f(effectiveX + delta) % q === 0.  Return the smallest delta found.
+ * Use known-root optimisation (from the Python find_paths.py whiteout):
+ *
+ * Since p | f(y), y%p is a root of f mod p.  The forward skip to the next
+ * position where p | f(effectiveX + delta) is:
+ *   delta = ((root - effectiveX%p) + p) % p   (with 0 → p).
+ *
+ * For small primes (≤ GENERAL_ROOT_THRESHOLD) we enumerate ALL roots and
+ * cache them – this finds the smallest delta across all roots.  For large
+ * primes the known root y%p alone is used (O(1) per prime factor).
  */
 function generalEastSkip(
   effectiveX: number,
@@ -139,21 +165,42 @@ function generalEastSkip(
   const transformedY = Math.abs(Math.round(transform(gy)));
   if (transformedY <= 1) return null;
 
+  const cache = getRootCache(transform);
+  const absGy = Math.abs(Math.round(gy));
+  const exMod = effectiveX >= 0 ? effectiveX : effectiveX; // keep signed for modular arith
+
   let V = transformedY;
   let bestDelta = Infinity;
 
   while (V > 1) {
     const q = getSmallestPrimeFactor(V);
-    // Scan for the smallest delta in [1, q] where q | f(effectiveX + delta).
-    for (let delta = 1; delta <= q; delta++) {
-      if (delta >= bestDelta) break; // can't improve
-      const fVal = Math.round(transform(effectiveX + delta));
-      if (fVal % q === 0) {
-        bestDelta = delta;
-        break;
+
+    if (q <= GENERAL_ROOT_THRESHOLD) {
+      // Enumerate or fetch cached roots of f mod q.
+      let roots = cache.get(q);
+      if (!roots) {
+        roots = [];
+        for (let t = 0; t < q; t++) {
+          if (Math.round(transform(t)) % q === 0) roots.push(t);
+        }
+        cache.set(q, roots);
       }
+      for (const r of roots) {
+        let delta = ((r - (exMod % q)) % q + q) % q;
+        if (delta === 0) delta = q;
+        if (delta < bestDelta) bestDelta = delta;
+        if (bestDelta === 1) break;
+      }
+    } else {
+      // Large prime: use known root y%p (since q | f(y), y%q is a root).
+      const knownRoot = ((absGy % q) + q) % q;
+      let delta = ((knownRoot - (exMod % q)) % q + q) % q;
+      if (delta === 0) delta = q;
+      if (delta < bestDelta) bestDelta = delta;
     }
+
     while (V % q === 0) V = V / q;
+    if (bestDelta === 1) break;
   }
 
   return bestDelta === Infinity ? null : bestDelta;
@@ -171,15 +218,29 @@ function eastSkip(
   config: BacktraceConfig,
   linear: LinearTransform | null,
 ): number | null {
-  // Identity-transform fast path (original canFastForward).
+  // Identity-transform fast path — handles ALL y values (prime and composite)
+  // by iterating over distinct prime factors of |y|, matching the approach
+  // from find_paths.py whiteout_std.
   if (config.canFastForward) {
-    const p = Math.abs(currY);
-    if (isPrime(p) && p > 1) {
-      const effectiveX = config.getEffectiveX(currX, currY);
+    const absY = Math.abs(currY);
+    if (absY <= 1) return null;
+    const effectiveX = config.getEffectiveX(currX, currY);
+
+    let remaining = absY;
+    let bestSkip = Infinity;
+
+    while (remaining > 1) {
+      const p = getSmallestPrimeFactor(remaining);
       const rem = ((effectiveX % p) + p) % p;
-      return rem === 0 ? 1 : p - rem;
+      // Skip to the next x where p | effectiveX, i.e. effectiveX + skip ≡ 0 (mod p).
+      const skip = rem === 0 ? p : p - rem;
+      if (skip < bestSkip) bestSkip = skip;
+      if (bestSkip === 1) break;
+      // Remove all factors of p.
+      while (remaining % p === 0) remaining = remaining / p;
     }
-    return null;
+
+    return bestSkip === Infinity ? null : bestSkip;
   }
 
   // Generalised skip for the default coprime rule with a known transform.

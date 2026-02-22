@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, gcdBigInt, gcdIsOneBigInt, formatValue, createTransformFunction, getPrimeFactorCount, isPrime, TransformFunction } from '../utils/math';
+import { gcd, gcdBigInt, gcdIsOneBigInt, formatValue, createTransformFunction, getPrimeFactorCount, TransformFunction } from '../utils/math';
 import { Viewport, Point, Theme } from '../types';
 import { getRowShiftMagnitude } from '../utils/grid';
 import { MovePredicate } from '../utils/moveRule';
@@ -466,20 +466,31 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
 
       const p = Math.abs(currY);
-      const canJump = canFastForward && isPrime(p) && p > 1;
+      const canJump = canFastForward && p > 1;
 
       if (canJump) {
         const effectiveX = getEffectiveX(currX, currY);
-        const rem = ((effectiveX % p) + p) % p;
-        const jump = rem === 0 ? 1 : Math.min(p - rem, maxSteps - stepsUsed);
-
-        currX += jump;
-        const nextKey = `${currX},${currY}`;
-        if (seen.has(nextKey)) break;
-        stepsUsed += jump;
-        points.push({ x: currX, y: currY });
-        seen.add(nextKey);
-        continue;
+        // Compute min skip across all prime factors of p (handles composite rows).
+        let remaining = p;
+        let jump = Infinity;
+        while (remaining > 1) {
+          const f = remaining % 2 === 0 ? 2 : (() => { for (let i = 3; i * i <= remaining; i += 2) { if (remaining % i === 0) return i; } return remaining; })();
+          const rem = ((effectiveX % f) + f) % f;
+          const skip = rem === 0 ? f : f - rem;
+          if (skip < jump) jump = skip;
+          if (jump === 1) break;
+          while (remaining % f === 0) remaining = remaining / f;
+        }
+        if (jump !== Infinity) {
+          jump = Math.min(jump, maxSteps - stepsUsed);
+          currX += jump;
+          const nextKey = `${currX},${currY}`;
+          if (seen.has(nextKey)) break;
+          stepsUsed += jump;
+          points.push({ x: currX, y: currY });
+          seen.add(nextKey);
+          continue;
+        }
       }
 
       currX += 1;
