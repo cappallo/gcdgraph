@@ -73,6 +73,8 @@ interface ControlsProps {
   onSaveSlot: (description: string) => void;
   onLoadSlot: (slotId: string) => void;
   onDeleteSlot: (slotId: string) => void;
+  shear: boolean;
+  setShear: (b: boolean) => void;
 }
 
 const Controls: React.FC<ControlsProps> = ({
@@ -122,6 +124,8 @@ const Controls: React.FC<ControlsProps> = ({
   onSaveSlot,
   onLoadSlot,
   onDeleteSlot,
+  shear,
+  setShear,
 }) => {
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
@@ -776,6 +780,20 @@ const Controls: React.FC<ControlsProps> = ({
                   className="w-4 h-4 accent-indigo-600 rounded"
                   checked={wraparound}
                   onChange={(e) => setWraparound(e.target.checked)}
+                />
+              </label>
+
+              <label
+                className={`flex items-center justify-between text-sm font-medium cursor-pointer ${
+                  isDark ? "text-gray-300" : "text-gray-700"
+                }`}
+              >
+                <span>Shear</span>
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-indigo-600 rounded"
+                  checked={shear}
+                  onChange={(e) => setShear(e.target.checked)}
                 />
               </label>
 

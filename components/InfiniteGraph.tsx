@@ -25,6 +25,7 @@ interface InfiniteGraphProps {
   backtraceLimit: number;
   groundRow: number;
   onBacktrailChange?: (len: number | null) => void;
+  shear: boolean;
 }
 
 // Calculate a readable text color (light/dark) against a given background color.
@@ -210,7 +211,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   pathStepLimit,
   backtraceLimit,
   groundRow,
-  onBacktrailChange
+  onBacktrailChange,
+  shear
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -238,8 +240,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   }, [transformFunc]);
 
   const cacheKey = useMemo(() => {
-    return `${transformFunc}|${rowShift}|${randomizeShift ? 1 : 0}|${moveRightPredicate.isDefaultCoprimeRule ? 1 : 0}`;
-  }, [moveRightPredicate.isDefaultCoprimeRule, randomizeShift, rowShift, transformFunc]);
+    return `${transformFunc}|${rowShift}|${randomizeShift ? 1 : 0}|${shear ? 1 : 0}|${moveRightPredicate.isDefaultCoprimeRule ? 1 : 0}`;
+  }, [moveRightPredicate.isDefaultCoprimeRule, randomizeShift, rowShift, shear, transformFunc]);
 
   const bigIntXCache = useRef<Map<bigint, bigint | null>>(new Map());
   const bigIntYCache = useRef<Map<bigint, bigint | null>>(new Map());
@@ -259,15 +261,16 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     else onBacktrailChange(null);
   }, [tracedPath, onBacktrailChange]);
 
-  // Helper to calculate effective X based on row shift
+  // Helper to calculate effective X based on row shift (and optional shear)
   const getEffectiveX = useCallback((gx: number, gy: number) => {
+    const shearedX = shear ? gx + gy : gx;
     const offset = getRowShiftMagnitude(gy, rowShift, randomizeShift);
     if (offset > 0) {
-        if (gy > 0) return gx - offset;
-        if (gy < 0) return gx + offset;
+        if (gy > 0) return shearedX - offset;
+        if (gy < 0) return shearedX + offset;
     }
-    return gx;
-  }, [rowShift, randomizeShift, getRowShiftMagnitude]);
+    return shearedX;
+  }, [shear, rowShift, randomizeShift]);
 
   const computeBigIsCoprime = useCallback((gx: number, gy: number): boolean | null => {
     if (cacheKeyRef.current !== cacheKey) {
@@ -554,11 +557,16 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const minY = Math.floor(centerY - halfHeight / zoom);
     const maxY = Math.ceil(centerY + halfHeight / zoom);
 
+    // When shear is on, lattice node (gx, gy) is rendered at display x = gx + gy.
+    // Expand the gx loop bounds to cover all nodes whose display x falls on screen.
+    const loopMinX = shear ? minX - maxY : minX;
+    const loopMaxX = shear ? maxX - minY : maxX;
+
     const showText = zoom > 30;
     const showNodes = zoom > 12;
     
     const toScreen = (gx: number, gy: number) => ({
-      x: (gx - centerX) * zoom + halfWidth,
+      x: ((shear ? gx + gy : gx) - centerX) * zoom + halfWidth,
       y: -(gy - centerY) * zoom + halfHeight
     });
 
@@ -570,7 +578,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     ctx.lineWidth = gridLineWidth;
     ctx.lineCap = 'round';
 
-    const totalNodes = (maxX - minX) * (maxY - minY);
+    const totalNodes = (loopMaxX - loopMinX) * (maxY - minY);
     const skipFactor = totalNodes > 50000 ? Math.ceil(Math.sqrt(totalNodes / 50000)) : 1;
 
     // Reduced node size to increase gap
@@ -596,7 +604,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       labels.push(label);
     };
 
-    for (let gx = minX; gx <= maxX; gx += skipFactor) {
+    for (let gx = loopMinX; gx <= loopMaxX; gx += skipFactor) {
       for (let gy = minY; gy <= maxY; gy += skipFactor) {
         const { x: screenX, y: screenY } = toScreen(gx, gy);
         
@@ -752,8 +760,10 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
             if (isWrapDiscontinuity(p1, p2)) continue;
 
-            if (p1.x < minX - 1 && p2.x < minX - 1) continue;
-            if (p1.x > maxX + 1 && p2.x > maxX + 1) continue;
+            const p1dx = shear ? p1.x + p1.y : p1.x;
+            const p2dx = shear ? p2.x + p2.y : p2.x;
+            if (p1dx < minX - 1 && p2dx < minX - 1) continue;
+            if (p1dx > maxX + 1 && p2dx > maxX + 1) continue;
             if (p1.y < minY - 1 && p2.y < minY - 1) continue;
             if (p1.y > maxY + 1 && p2.y > maxY + 1) continue;
 
@@ -783,7 +793,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
         if (showNodes) {
             for (const p of path.points) {
-                if (p.x < minX - 1 || p.x > maxX + 1 || p.y < minY - 1 || p.y > maxY + 1) continue;
+                const pdx = shear ? p.x + p.y : p.x;
+                if (pdx < minX - 1 || pdx > maxX + 1 || p.y < minY - 1 || p.y > maxY + 1) continue;
                 
                 const isCoprimePath = computeBigIsCoprime(p.x, p.y);
                 const effectiveX = getEffectiveX(p.x, p.y);
@@ -980,7 +991,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound]);
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound, shear]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {
@@ -1072,8 +1083,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const centerY = viewport.y;
         const halfWidth = rect.width / 2;
         const halfHeight = rect.height / 2;
-        const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
         const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
+        const gx = Math.round((x - halfWidth) / viewport.zoom + centerX - (shear ? gy : 0));
         
         onCursorMove({ x: gx, y: gy });
     }
@@ -1134,8 +1145,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
              const centerY = viewport.y;
              const halfWidth = rect.width / 2;
              const halfHeight = rect.height / 2;
-             const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
              const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
+             const gx = Math.round((x - halfWidth) / viewport.zoom + centerX - (shear ? gy : 0));
 
              const clicked = { x: gx, y: gy };
              const tracedKey = tracedAnchor.current ? `${tracedAnchor.current.x},${tracedAnchor.current.y}` : '';
@@ -1203,8 +1214,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const centerY = viewport.y;
     const halfWidth = rect.width / 2;
     const halfHeight = rect.height / 2;
-    const gx = Math.round((x - halfWidth) / viewport.zoom + centerX);
     const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
+    const gx = Math.round((x - halfWidth) / viewport.zoom + centerX - (shear ? gy : 0));
 
     const key = `${gx},${gy}`;
     if (tracedAnchor.current && `${tracedAnchor.current.x},${tracedAnchor.current.y}` === key) {
