@@ -409,6 +409,33 @@ export type TransformFunction = ((x: number) => number) & {
   isValid?: boolean;
 };
 
+export const splitTopLevelExpressions = (input: string): string[] => {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === "(") {
+      depth += 1;
+      continue;
+    }
+    if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (ch === "," && depth === 0) {
+      const part = input.slice(start, i).trim();
+      if (part) parts.push(part);
+      start = i + 1;
+    }
+  }
+
+  const tail = input.slice(start).trim();
+  if (tail) parts.push(tail);
+  return parts;
+};
+
 // Create a safe transform function from a string expression like "2x+1" without using eval/Function
 export const createTransformFunction = (
   expression: string

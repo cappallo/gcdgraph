@@ -958,10 +958,10 @@ const Controls: React.FC<ControlsProps> = ({
                       onBlur={commitOverlayPlot}
                       onKeyDown={handleOverlayPlotKeyDown}
                       className={`w-full px-2 py-1 rounded border ${inputClass} text-sm font-mono`}
-                      placeholder="e.g. 3n+1 or n^2+1"
+                      placeholder="e.g. 3n+1, n^2+1, sqrt(n)"
                     />
                     <p className="text-[10px] opacity-60 mt-1">
-                      Draws a dashed top overlay through points (f(y), y) across the visible view.
+                      Draws dashed overlays through points (f(y), y). Separate multiple formulas with commas.
                     </p>
                     {overlayPlotError && (
                       <p className="text-[10px] text-red-400 mt-1">

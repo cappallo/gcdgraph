@@ -8,7 +8,13 @@ import React, {
 import InfiniteGraph from "./components/InfiniteGraph";
 import Controls from "./components/Controls";
 import { Viewport, Theme, Point } from "./types";
-import { createTransformFunction, gcd, gcdBigInt, isPrime } from "./utils/math";
+import {
+  createTransformFunction,
+  gcd,
+  gcdBigInt,
+  isPrime,
+  splitTopLevelExpressions,
+} from "./utils/math";
 import { getRowOffset, getRowShiftMagnitude, pointKey } from "./utils/grid";
 import {
   compileMoveRightPredicate,
@@ -656,8 +662,16 @@ function App() {
   const overlayPlotError = useMemo(() => {
     const trimmed = overlayPlotExpr.trim();
     if (!trimmed) return undefined;
-    const fn = createTransformFunction(trimmed);
-    return fn.isValid ? undefined : "Invalid plot expression.";
+    const expressions = splitTopLevelExpressions(trimmed);
+    if (expressions.length === 0) return "Invalid plot expression.";
+
+    const hasInvalidExpression = expressions.some(
+      (expr) => !createTransformFunction(expr).isValid
+    );
+    if (!hasInvalidExpression) return undefined;
+    return expressions.length === 1
+      ? "Invalid plot expression."
+      : "One or more plot expressions are invalid.";
   }, [overlayPlotExpr]);
 
   const moveRight = useMemo(

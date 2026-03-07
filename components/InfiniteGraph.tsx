@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, gcdBigInt, gcdIsOneBigInt, formatValue, createTransformFunction, getPrimeFactorCount, TransformFunction } from '../utils/math';
+import { gcd, gcdBigInt, gcdIsOneBigInt, formatValue, createTransformFunction, getPrimeFactorCount, splitTopLevelExpressions, TransformFunction } from '../utils/math';
 import { Viewport, Point, Theme } from '../types';
 import { getRowShiftMagnitude } from '../utils/grid';
 import { MovePredicate } from '../utils/moveRule';
@@ -173,6 +173,25 @@ const formatBigIntCompact = (raw: string): string => {
 
 const labelFont = (size: number) => `bold ${size}px 'SFMono-Regular','Menlo','Consolas','Liberation Mono',monospace`;
 
+const OVERLAY_PLOT_COLORS = [
+  { light: '#ea580c', dark: '#fcd34d' },
+  { light: '#38bdf8', dark: '#7dd3fc' },
+  { light: '#22c55e', dark: '#4ade80' },
+  { light: '#e11d48', dark: '#fb7185' },
+  { light: '#7c3aed', dark: '#a78bfa' },
+  { light: '#0f766e', dark: '#2dd4bf' },
+];
+
+const getOverlayPlotStrokeColor = (index: number, isDark: boolean) => {
+  const preset = OVERLAY_PLOT_COLORS[index];
+  if (preset) return isDark ? preset.dark : preset.light;
+
+  const hue = (index * 137.508) % 360;
+  const saturation = 72;
+  const lightness = isDark ? 70 : 46;
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+};
+
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const BIGINT_X_CACHE_LIMIT = 100000;
 const BIGINT_Y_CACHE_LIMIT = 100000;
@@ -241,9 +260,16 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return createTransformFunction(transformFunc);
   }, [transformFunc]);
 
-  const overlayPlotTransform = useMemo<TransformFunction>(() => {
-    return createTransformFunction(overlayPlotExpr);
+  const overlayPlotExpressions = useMemo(() => {
+    return splitTopLevelExpressions(overlayPlotExpr);
   }, [overlayPlotExpr]);
+
+  const overlayPlotTransforms = useMemo(() => {
+    return overlayPlotExpressions.map((expr) => ({
+      expr,
+      transform: createTransformFunction(expr),
+    }));
+  }, [overlayPlotExpressions]);
 
   const cacheKey = useMemo(() => {
     return `${transformFunc}|${rowShift}|${randomizeShift ? 1 : 0}|${shear ? 1 : 0}|${moveRightPredicate.isDefaultCoprimeRule ? 1 : 0}`;
@@ -1002,8 +1028,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-    if (overlayPlotExpr.trim() && overlayPlotTransform.isValid) {
-      const plotPath = new Path2D();
+    if (overlayPlotTransforms.length > 0) {
       const paramMin = minY - 1;
       const paramMax = maxY + 1;
       const sampleCount = Math.max(160, Math.ceil(height / 2));
@@ -1011,47 +1036,53 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       const xRange = Math.max(1, maxX - minX);
       const xMargin = Math.max(6, xRange * 0.5);
       const maxScreenJump = Math.max(120, width * 0.85);
-      let prevPoint: { x: number; y: number } | null = null;
-      let hasSegment = false;
+      const dashLength = 12;
+      const gapLength = 8;
 
-      for (let i = 0; i <= sampleCount; i++) {
-        const yVal = paramMin + step * i;
-        const xVal = overlayPlotTransform(yVal);
+      overlayPlotTransforms.forEach(({ transform }, index) => {
+        if (!transform.isValid) return;
 
-        if (!Number.isFinite(xVal) || xVal < minX - xMargin || xVal > maxX + xMargin) {
-          prevPoint = null;
-          continue;
+        const plotPath = new Path2D();
+        let prevPoint: { x: number; y: number } | null = null;
+        let hasSegment = false;
+
+        for (let i = 0; i <= sampleCount; i++) {
+          const yVal = paramMin + step * i;
+          const xVal = transform(yVal);
+
+          if (!Number.isFinite(xVal) || xVal < minX - xMargin || xVal > maxX + xMargin) {
+            prevPoint = null;
+            continue;
+          }
+
+          const screenPoint = toScreenUnsheared(xVal, yVal);
+          const farOffscreen =
+            screenPoint.x < -width ||
+            screenPoint.x > width * 2 ||
+            screenPoint.y < -height ||
+            screenPoint.y > height * 2;
+
+          if (farOffscreen) {
+            prevPoint = null;
+            continue;
+          }
+
+          if (
+            !prevPoint ||
+            Math.abs(screenPoint.x - prevPoint.x) > maxScreenJump ||
+            Math.abs(screenPoint.y - prevPoint.y) > maxScreenJump
+          ) {
+            plotPath.moveTo(screenPoint.x, screenPoint.y);
+          } else {
+            plotPath.lineTo(screenPoint.x, screenPoint.y);
+            hasSegment = true;
+          }
+
+          prevPoint = screenPoint;
         }
 
-        const screenPoint = toScreenUnsheared(xVal, yVal);
-        const farOffscreen =
-          screenPoint.x < -width ||
-          screenPoint.x > width * 2 ||
-          screenPoint.y < -height ||
-          screenPoint.y > height * 2;
+        if (!hasSegment) return;
 
-        if (farOffscreen) {
-          prevPoint = null;
-          continue;
-        }
-
-        if (
-          !prevPoint ||
-          Math.abs(screenPoint.x - prevPoint.x) > maxScreenJump ||
-          Math.abs(screenPoint.y - prevPoint.y) > maxScreenJump
-        ) {
-          plotPath.moveTo(screenPoint.x, screenPoint.y);
-        } else {
-          plotPath.lineTo(screenPoint.x, screenPoint.y);
-          hasSegment = true;
-        }
-
-        prevPoint = screenPoint;
-      }
-
-      if (hasSegment) {
-        const dashLength = 12;
-        const gapLength = 8;
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, width, height);
@@ -1065,14 +1096,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         ctx.lineWidth = 7;
         ctx.stroke(plotPath);
 
-        ctx.strokeStyle = isDark ? '#fcd34d' : '#ea580c';
+        ctx.strokeStyle = getOverlayPlotStrokeColor(index, isDark);
         ctx.lineWidth = 3;
         ctx.stroke(plotPath);
         ctx.restore();
-      }
+      });
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, overlayPlotExpr, overlayPlotTransform, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound, shear]);
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, overlayPlotTransforms, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound, shear]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {
