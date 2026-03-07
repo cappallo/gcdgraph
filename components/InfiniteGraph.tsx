@@ -10,6 +10,7 @@ interface InfiniteGraphProps {
   onViewportChange: React.Dispatch<React.SetStateAction<Viewport>>;
   theme: Theme;
   transformFunc: string;
+  overlayPlotExpr: string;
   moveRightPredicate: MovePredicate;
   simpleView: boolean;
   showFactored: boolean;
@@ -197,6 +198,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   onViewportChange, 
   theme, 
   transformFunc,
+  overlayPlotExpr,
   moveRightPredicate,
   simpleView,
   showFactored,
@@ -238,6 +240,10 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   const activeTransform = useMemo<TransformFunction>(() => {
     return createTransformFunction(transformFunc);
   }, [transformFunc]);
+
+  const overlayPlotTransform = useMemo<TransformFunction>(() => {
+    return createTransformFunction(overlayPlotExpr);
+  }, [overlayPlotExpr]);
 
   const cacheKey = useMemo(() => {
     return `${transformFunc}|${rowShift}|${randomizeShift ? 1 : 0}|${shear ? 1 : 0}|${moveRightPredicate.isDefaultCoprimeRule ? 1 : 0}`;
@@ -567,6 +573,11 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     
     const toScreen = (gx: number, gy: number) => ({
       x: ((shear ? gx + gy : gx) - centerX) * zoom + halfWidth,
+      y: -(gy - centerY) * zoom + halfHeight
+    });
+
+    const toScreenUnsheared = (gx: number, gy: number) => ({
+      x: (gx - centerX) * zoom + halfWidth,
       y: -(gy - centerY) * zoom + halfHeight
     });
 
@@ -991,7 +1002,77 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound, shear]);
+    if (overlayPlotExpr.trim() && overlayPlotTransform.isValid) {
+      const plotPath = new Path2D();
+      const paramMin = minY - 1;
+      const paramMax = maxY + 1;
+      const sampleCount = Math.max(160, Math.ceil(height / 2));
+      const step = (paramMax - paramMin) / sampleCount;
+      const xRange = Math.max(1, maxX - minX);
+      const xMargin = Math.max(6, xRange * 0.5);
+      const maxScreenJump = Math.max(120, width * 0.85);
+      let prevPoint: { x: number; y: number } | null = null;
+      let hasSegment = false;
+
+      for (let i = 0; i <= sampleCount; i++) {
+        const yVal = paramMin + step * i;
+        const xVal = overlayPlotTransform(yVal);
+
+        if (!Number.isFinite(xVal) || xVal < minX - xMargin || xVal > maxX + xMargin) {
+          prevPoint = null;
+          continue;
+        }
+
+        const screenPoint = toScreenUnsheared(xVal, yVal);
+        const farOffscreen =
+          screenPoint.x < -width ||
+          screenPoint.x > width * 2 ||
+          screenPoint.y < -height ||
+          screenPoint.y > height * 2;
+
+        if (farOffscreen) {
+          prevPoint = null;
+          continue;
+        }
+
+        if (
+          !prevPoint ||
+          Math.abs(screenPoint.x - prevPoint.x) > maxScreenJump ||
+          Math.abs(screenPoint.y - prevPoint.y) > maxScreenJump
+        ) {
+          plotPath.moveTo(screenPoint.x, screenPoint.y);
+        } else {
+          plotPath.lineTo(screenPoint.x, screenPoint.y);
+          hasSegment = true;
+        }
+
+        prevPoint = screenPoint;
+      }
+
+      if (hasSegment) {
+        const dashLength = 12;
+        const gapLength = 8;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, width, height);
+        ctx.clip();
+        ctx.setLineDash([dashLength, gapLength]);
+        ctx.lineDashOffset = 0;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        ctx.strokeStyle = isDark ? 'rgba(17, 24, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+        ctx.lineWidth = 7;
+        ctx.stroke(plotPath);
+
+        ctx.strokeStyle = isDark ? '#fcd34d' : '#ea580c';
+        ctx.lineWidth = 3;
+        ctx.stroke(plotPath);
+        ctx.restore();
+      }
+    }
+
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, overlayPlotExpr, overlayPlotTransform, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound, shear]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {

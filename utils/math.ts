@@ -406,13 +406,18 @@ export const getPartitionColor = (n: number): string => {
 
 export type TransformFunction = ((x: number) => number) & {
   evalBigInt?: (x: bigint) => bigint | null;
+  isValid?: boolean;
 };
 
 // Create a safe transform function from a string expression like "2x+1" without using eval/Function
 export const createTransformFunction = (
   expression: string
 ): TransformFunction => {
-  if (!expression || !expression.trim()) return (x) => x;
+  if (!expression || !expression.trim()) {
+    const identity = ((x: number) => x) as TransformFunction;
+    identity.isValid = true;
+    return identity;
+  }
 
   // Tokenize the input into numbers, operators, variables, and parentheses
   type Token =
@@ -821,12 +826,14 @@ export const createTransformFunction = (
   const tokens = tokenize(expression.replace(/\s+/g, ""));
   if (!tokens) {
     const fallback = ((x: number) => x) as TransformFunction;
+    fallback.isValid = false;
     return fallback;
   }
 
   const rpn = toRpn(addImplicitMultiplication(tokens));
   if (!rpn) {
     const fallback = ((x: number) => x) as TransformFunction;
+    fallback.isValid = false;
     return fallback;
   }
 
@@ -848,6 +855,7 @@ export const createTransformFunction = (
   if (supportsBigInt) {
     fn.evalBigInt = (x: bigint) => evalRpnBigInt(rpn, x);
   }
+  fn.isValid = true;
 
   return fn;
 };

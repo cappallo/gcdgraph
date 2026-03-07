@@ -52,10 +52,12 @@ interface SettingsSnapshot {
   viewport: Viewport;
   theme: Theme;
   transformFunc: string;
+  overlayPlotExpr: string;
   moveRightExpr: string;
   simpleView: boolean;
   wraparound: boolean;
   showFactored: boolean;
+  shear: boolean;
   rowShift: number;
   shiftLock: boolean;
   randomizeShift: boolean;
@@ -83,10 +85,12 @@ const DEFAULT_SETTINGS_SNAPSHOT: SettingsSnapshot = {
   viewport: DEFAULT_VIEWPORT,
   theme: "light",
   transformFunc: "n",
+  overlayPlotExpr: "",
   moveRightExpr: DEFAULT_MOVE_RIGHT_EXPR,
   simpleView: false,
   wraparound: false,
   showFactored: true,
+  shear: false,
   rowShift: 0,
   shiftLock: false,
   randomizeShift: false,
@@ -158,6 +162,7 @@ function App() {
 
   const [theme, setTheme] = useState<Theme>("light");
   const [transformFunc, setTransformFunc] = useState<string>("n");
+  const [overlayPlotExpr, setOverlayPlotExpr] = useState<string>("");
   const [moveRightExpr, setMoveRightExpr] = useState<string>(
     DEFAULT_MOVE_RIGHT_EXPR
   );
@@ -276,6 +281,9 @@ function App() {
       if (data.theme) setTheme(data.theme);
       if (typeof data.transformFunc === "string")
         setTransformFunc(data.transformFunc);
+      if (typeof data.overlayPlotExpr === "string") {
+        setOverlayPlotExpr(data.overlayPlotExpr);
+      }
       if (typeof data.moveRightExpr === "string")
         setMoveRightExpr(data.moveRightExpr);
       if (typeof data.simpleView === "boolean") setSimpleView(data.simpleView);
@@ -287,6 +295,7 @@ function App() {
       }
       if (typeof data.showFactored === "boolean")
         setShowFactored(data.showFactored);
+      if (typeof data.shear === "boolean") setShear(data.shear);
       if (data.rowShiftBounds) setRowShiftBounds(nextRowShiftBounds);
       if (data.rowShiftBounds || Number.isFinite(data.rowShift))
         setRowShift(nextRowShift);
@@ -348,10 +357,12 @@ function App() {
       viewport,
       theme,
       transformFunc,
+      overlayPlotExpr,
       moveRightExpr,
       simpleView,
       wraparound,
       showFactored,
+      shear,
       rowShift,
       shiftLock,
       randomizeShift,
@@ -371,10 +382,12 @@ function App() {
       viewport,
       theme,
       transformFunc,
+      overlayPlotExpr,
       moveRightExpr,
       simpleView,
       wraparound,
       showFactored,
+      shear,
       rowShift,
       shiftLock,
       randomizeShift,
@@ -482,10 +495,12 @@ function App() {
       viewport,
       theme,
       transformFunc,
+      overlayPlotExpr,
       moveRightExpr,
       simpleView,
       wraparound,
       showFactored,
+      shear,
       rowShift,
       shiftLock,
       randomizeShift,
@@ -508,10 +523,12 @@ function App() {
     viewport,
     theme,
     transformFunc,
+    overlayPlotExpr,
     moveRightExpr,
     simpleView,
     wraparound,
     showFactored,
+    shear,
     rowShift,
     shiftLock,
     randomizeShift,
@@ -635,6 +652,13 @@ function App() {
     () => evaluateAutoExpr(autoHighlightExpr),
     [autoHighlightExpr, evaluateAutoExpr]
   );
+
+  const overlayPlotError = useMemo(() => {
+    const trimmed = overlayPlotExpr.trim();
+    if (!trimmed) return undefined;
+    const fn = createTransformFunction(trimmed);
+    return fn.isValid ? undefined : "Invalid plot expression.";
+  }, [overlayPlotExpr]);
 
   const moveRight = useMemo(
     () => compileMoveRightPredicate(moveRightExpr),
@@ -889,6 +913,7 @@ function App() {
         onViewportChange={setViewport}
         theme={theme}
         transformFunc={transformFunc}
+        overlayPlotExpr={overlayPlotExpr}
         moveRightPredicate={moveRight.fn}
         simpleView={simpleView}
         showFactored={showFactored}
@@ -913,6 +938,9 @@ function App() {
         setTheme={setTheme}
         transformFunc={transformFunc}
         setTransformFunc={setTransformFunc}
+        overlayPlotExpr={overlayPlotExpr}
+        setOverlayPlotExpr={setOverlayPlotExpr}
+        overlayPlotError={overlayPlotError}
         moveRightExpr={moveRightExpr}
         setMoveRightExpr={setMoveRightExpr}
         moveRightError={moveRight.error}

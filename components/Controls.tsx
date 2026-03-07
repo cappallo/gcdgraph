@@ -39,6 +39,9 @@ interface ControlsProps {
   setTheme: (t: Theme) => void;
   transformFunc: string;
   setTransformFunc: (s: string) => void;
+  overlayPlotExpr: string;
+  setOverlayPlotExpr: (s: string) => void;
+  overlayPlotError?: string;
   moveRightExpr: string;
   setMoveRightExpr: (s: string) => void;
   moveRightError?: string;
@@ -90,6 +93,9 @@ const Controls: React.FC<ControlsProps> = ({
   setTheme,
   transformFunc,
   setTransformFunc,
+  overlayPlotExpr,
+  setOverlayPlotExpr,
+  overlayPlotError,
   moveRightExpr,
   setMoveRightExpr,
   moveRightError,
@@ -135,6 +141,7 @@ const Controls: React.FC<ControlsProps> = ({
 }) => {
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
+  const [overlayPlotInput, setOverlayPlotInput] = useState(overlayPlotExpr);
   const [moveRightInput, setMoveRightInput] = useState(moveRightExpr);
   const [showSettings, setShowSettings] = useState(true);
   const [autoHighlightInput, setAutoHighlightInput] =
@@ -168,6 +175,9 @@ const Controls: React.FC<ControlsProps> = ({
   useEffect(() => {
     setFuncInput(transformFunc);
   }, [transformFunc]);
+  useEffect(() => {
+    setOverlayPlotInput(overlayPlotExpr);
+  }, [overlayPlotExpr]);
   useEffect(() => {
     setMoveRightInput(moveRightExpr);
   }, [moveRightExpr]);
@@ -219,6 +229,10 @@ const Controls: React.FC<ControlsProps> = ({
     setTransformFunc(funcInput);
   };
 
+  const commitOverlayPlot = () => {
+    setOverlayPlotExpr(overlayPlotInput);
+  };
+
   const commitMoveRight = () => {
     setMoveRightExpr(moveRightInput);
   };
@@ -226,6 +240,13 @@ const Controls: React.FC<ControlsProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
       commitFunc();
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  const handleOverlayPlotKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      commitOverlayPlot();
       (e.target as HTMLInputElement).blur();
     }
   };
@@ -922,6 +943,33 @@ const Controls: React.FC<ControlsProps> = ({
 
               {showAdvanced && (
                 <div className="mt-3 space-y-3 text-sm">
+                  <div>
+                    <label
+                      className={`block text-xs font-medium mb-1 ${
+                        isDark ? "text-gray-400" : "text-gray-500"
+                      }`}
+                    >
+                      Overlay plot x = f(y)
+                    </label>
+                    <input
+                      type="text"
+                      value={overlayPlotInput}
+                      onChange={(e) => setOverlayPlotInput(e.target.value)}
+                      onBlur={commitOverlayPlot}
+                      onKeyDown={handleOverlayPlotKeyDown}
+                      className={`w-full px-2 py-1 rounded border ${inputClass} text-sm font-mono`}
+                      placeholder="e.g. 3n+1 or n^2+1"
+                    />
+                    <p className="text-[10px] opacity-60 mt-1">
+                      Draws a dashed top overlay through points (f(y), y) across the visible view.
+                    </p>
+                    {overlayPlotError && (
+                      <p className="text-[10px] text-red-400 mt-1">
+                        {overlayPlotError}
+                      </p>
+                    )}
+                  </div>
+
                   <div>
                     <label
                       className={`block text-xs font-medium mb-1 ${
