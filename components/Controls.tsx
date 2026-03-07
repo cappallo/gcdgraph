@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Plus,
   Minus,
@@ -14,7 +14,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { Viewport, Theme, Point } from "../types";
-import { formatValue } from "../utils/math";
+import {
+  createTransformFunction,
+  formatBigIntValue,
+  formatValue,
+} from "../utils/math";
 
 interface RowShiftBounds {
   min: number;
@@ -25,6 +29,8 @@ interface SavedSlotSummary {
   id: string;
   description: string;
 }
+
+const FAST_FACTOR_LIMIT = 10n ** 24n;
 
 interface ControlsProps {
   viewport: Viewport;
@@ -362,6 +368,52 @@ const Controls: React.FC<ControlsProps> = ({
     return `${sign}${factored || abs.toString()}`;
   };
 
+  const formatNumericValue = (n: number) => {
+    if (!Number.isFinite(n)) return String(n);
+    if (Number.isInteger(n)) return n.toString();
+    return Number(n.toPrecision(10)).toString();
+  };
+
+  const formatExactValue = (n: bigint | null, fallback: number) => {
+    if (n !== null) return n.toString();
+    return formatNumericValue(fallback);
+  };
+
+  const formatSmallFactoredValue = (fallback: number, exact: bigint | null) => {
+    if (exact !== null) {
+      if (exact === 0n || exact === 1n || exact === -1n) return exact.toString();
+      const abs = exact < 0n ? -exact : exact;
+      if (abs > FAST_FACTOR_LIMIT) return exact.toString();
+      const sign = exact < 0n ? "-" : "";
+      const factored = formatBigIntValue(abs);
+      return `${sign}${factored || abs.toString()}`;
+    }
+
+    if (!Number.isFinite(fallback)) return String(fallback);
+    if (!Number.isInteger(fallback)) return formatNumericValue(fallback);
+    if (fallback === 0 || fallback === 1 || fallback === -1) return fallback.toString();
+
+    const abs = Math.abs(fallback);
+    if (!Number.isSafeInteger(abs) || BigInt(abs) > FAST_FACTOR_LIMIT) {
+      return formatNumericValue(fallback);
+    }
+
+    const sign = fallback < 0 ? "-" : "";
+    const factored = formatValue(abs);
+    return `${sign}${factored || abs.toString()}`;
+  };
+
+  const transformedCursorValues = useMemo(() => {
+    const transform = createTransformFunction(transformFunc);
+    const evalBigInt = transform.evalBigInt;
+    return {
+      x: transform(cursorPos.x),
+      y: transform(cursorPos.y),
+      xExact: evalBigInt ? evalBigInt(BigInt(cursorPos.x)) : null,
+      yExact: evalBigInt ? evalBigInt(BigInt(cursorPos.y)) : null,
+    };
+  }, [cursorPos.x, cursorPos.y, transformFunc]);
+
   const btnClass = isDark
     ? "bg-gray-800 text-gray-200 hover:bg-gray-700 border-gray-700"
     : "bg-white text-gray-700 hover:bg-gray-50 border-gray-200";
@@ -398,6 +450,28 @@ const Controls: React.FC<ControlsProps> = ({
           </span>
           <span className="w-32 text-center">
             {formatFactoredInt(cursorPos.y)}
+          </span>
+        </div>
+        <div className="flex gap-6 text-sm mt-3 font-mono tracking-tight">
+          <span className="w-32">f(X): {formatExactValue(transformedCursorValues.xExact, transformedCursorValues.x)}</span>
+          <span className="w-32">f(Y): {formatExactValue(transformedCursorValues.yExact, transformedCursorValues.y)}</span>
+        </div>
+        <div
+          className={`flex gap-6 text-base mt-1 font-mono ${
+            isDark ? "text-white" : "text-gray-700"
+          }`}
+        >
+          <span className="w-32 text-center">
+            {formatSmallFactoredValue(
+              transformedCursorValues.x,
+              transformedCursorValues.xExact
+            )}
+          </span>
+          <span className="w-32 text-center">
+            {formatSmallFactoredValue(
+              transformedCursorValues.y,
+              transformedCursorValues.yExact
+            )}
           </span>
         </div>
         <div

@@ -243,6 +243,114 @@ export const formatValue = (n: number): string => {
   return parts.join("·");
 };
 
+const modPowBigInt = (base: bigint, exp: bigint, mod: bigint): bigint => {
+  let result = 1n;
+  let b = ((base % mod) + mod) % mod;
+  let e = exp;
+  while (e > 0n) {
+    if (e & 1n) result = (result * b) % mod;
+    e >>= 1n;
+    if (e > 0n) b = (b * b) % mod;
+  }
+  return result;
+};
+
+const isProbablePrimeBigInt = (n: bigint): boolean => {
+  if (n < 2n) return false;
+
+  const smallPrimes = [
+    2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n,
+  ];
+
+  for (const prime of smallPrimes) {
+    if (n === prime) return true;
+    if (n % prime === 0n) return false;
+  }
+
+  let d = n - 1n;
+  let s = 0;
+  while ((d & 1n) === 0n) {
+    d >>= 1n;
+    s += 1;
+  }
+
+  for (const witness of smallPrimes) {
+    if (witness >= n) continue;
+    let x = modPowBigInt(witness, d, n);
+    if (x === 1n || x === n - 1n) continue;
+
+    let composite = true;
+    for (let i = 1; i < s; i++) {
+      x = (x * x) % n;
+      if (x === n - 1n) {
+        composite = false;
+        break;
+      }
+    }
+
+    if (composite) return false;
+  }
+
+  return true;
+};
+
+const pollardRhoBigInt = (n: bigint): bigint => {
+  if (n % 2n === 0n) return 2n;
+  if (n % 3n === 0n) return 3n;
+
+  for (let seed = 1n; seed <= 16n; seed += 1n) {
+    let x = 2n + seed;
+    let y = 2n + seed;
+    let d = 1n;
+    const c = seed;
+    const step = (value: bigint) => (value * value + c) % n;
+
+    for (let iter = 0; iter < 20000; iter += 1) {
+      x = step(x);
+      y = step(step(y));
+      const diff = x > y ? x - y : y - x;
+      d = gcdBigInt(diff, n);
+
+      if (d === 1n) continue;
+      if (d !== n) return d;
+      break;
+    }
+  }
+
+  return n;
+};
+
+const factorBigIntInto = (n: bigint, counts: Map<bigint, number>) => {
+  if (n === 1n) return;
+  if (isProbablePrimeBigInt(n)) {
+    counts.set(n, (counts.get(n) || 0) + 1);
+    return;
+  }
+
+  const divisor = pollardRhoBigInt(n);
+  if (divisor === n) {
+    counts.set(n, (counts.get(n) || 0) + 1);
+    return;
+  }
+
+  factorBigIntInto(divisor, counts);
+  factorBigIntInto(n / divisor, counts);
+};
+
+export const formatBigIntValue = (n: bigint): string => {
+  if (n === 1n) return "";
+
+  const factors = new Map<bigint, number>();
+  factorBigIntInto(n, factors);
+
+  return Array.from(factors.entries())
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([prime, count]) =>
+      count > 1 ? `${prime.toString()}${toSuperscript(count)}` : prime.toString()
+    )
+    .join("·");
+};
+
 const toSuperscript = (num: number): string => {
   const map: Record<string, string> = {
     "0": "⁰",

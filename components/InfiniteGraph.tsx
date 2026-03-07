@@ -1085,8 +1085,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const halfHeight = rect.height / 2;
         const gy = Math.round(-((y - halfHeight) / viewport.zoom - centerY));
         const gx = Math.round((x - halfWidth) / viewport.zoom + centerX - (shear ? gy : 0));
-        
-        onCursorMove({ x: gx, y: gy });
+        const cursorX = shear ? gx + gy : gx;
+
+        onCursorMove({ x: cursorX, y: gy });
     }
 
     // 2. Update Pointer Cache
