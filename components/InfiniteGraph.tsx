@@ -26,6 +26,7 @@ interface InfiniteGraphProps {
   pathStepLimit: number;
   backtraceLimit: number;
   groundRow: number;
+  detailZoomCutoff: number;
   onBacktrailChange?: (len: number | null) => void;
   shear: boolean;
 }
@@ -240,6 +241,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   pathStepLimit,
   backtraceLimit,
   groundRow,
+  detailZoomCutoff,
   onBacktrailChange,
   shear
 }) => {
@@ -608,8 +610,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     const loopMinX = shear ? minX - maxY : minX;
     const loopMaxX = shear ? maxX - minY : maxX;
 
-    const showText = zoom > 30;
-    const showNodes = zoom > 12;
+    const showText = zoom > detailZoomCutoff;
     
     const toScreen = (gx: number, gy: number) => ({
       x: ((shear ? gx + gy : gx) - centerX) * zoom + halfWidth,
@@ -707,6 +708,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
     const totalNodes = (loopMaxX - loopMinX) * (maxY - minY);
     const skipFactor = totalNodes > 50000 ? Math.ceil(Math.sqrt(totalNodes / 50000)) : 1;
+    const showGraphDetails = showText && skipFactor === 1;
 
     // Reduced node size to increase gap
     const nodeSize = Math.max(2, zoom * 0.6); 
@@ -749,7 +751,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
         if (isCoprime !== null) {
           const needsBigValue =
-            (simpleView && !isCoprime) || (showText && skipFactor === 1 && !isCoprime);
+            (simpleView && !isCoprime) || (showGraphDetails && !isCoprime);
           if (needsBigValue) {
             gcdExact = computeBigGcdValue(gx, gy);
           }
@@ -804,7 +806,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         // Always show origin
         if (gx === 0 && gy === 0) hideNode = false;
         
-        if (showNodes) {
+        if (showGraphDetails) {
             // Connections
             ctx.strokeStyle = colors.grid;
             ctx.lineWidth = gridLineWidth; 
@@ -839,7 +841,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         }
 
         // Text
-        if (showText && skipFactor === 1 && !hideNode) {
+        if (showGraphDetails && !hideNode) {
             const nodeBgColor = (gx === 0 && gy === 0)
               ? colors.origin
               : (displayVal === 1 ? colors.nodeCoprime : colors.nodeFactor);
@@ -859,16 +861,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                   gKey: `${gx},${gy}`
                 });
             }
-        } else if (gx === 0 && gy === 0) {
-            const fontSize = Math.min(nodeSize * 0.4, 16);
-            pushLabel({
-              text: "0",
-              x: screenX,
-              y: screenY,
-              color: getContrastingTextColor(colors.origin),
-              font: labelFont(fontSize),
-              gKey: `${gx},${gy}`
-            });
         }
       }
     }
@@ -918,7 +910,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             ctx.stroke();
         }
 
-        if (showNodes) {
+        if (showGraphDetails) {
             for (const p of path.points) {
                 const pdx = shear ? p.x + p.y : p.x;
                 if (pdx < minX - 1 || pdx > maxX + 1 || p.y < minY - 1 || p.y > maxY + 1) continue;
@@ -935,7 +927,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
                 if (isCoprimePath !== null) {
                   const needsBigValue =
-                    (simpleView && !isCoprimePath) || (showText && skipFactor === 1 && !isCoprimePath);
+                    (simpleView && !isCoprimePath) || (showGraphDetails && !isCoprimePath);
                   if (needsBigValue) {
                     gcdExactPath = computeBigGcdValue(p.x, p.y);
                   }
@@ -985,7 +977,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                     ctx.strokeRect(s.x - halfSize, s.y - halfSize, nodeSize, nodeSize);
                 }
 
-                if (showText && skipFactor === 1) {
+                if (showGraphDetails) {
                     const bigLabelPath = gcdExactPath !== null && gcdExactPath > MAX_SAFE_BIGINT
                       ? gcdExactPath.toString()
                       : null;
@@ -1049,7 +1041,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         ctx.lineCap = 'round';
         ctx.stroke();
 
-        if (showNodes) {
+        if (showGraphDetails) {
             for (const p of tracedPath) {
                  if (p.x < minX - 1 || p.x > maxX + 1 || p.y < minY - 1 || p.y > maxY + 1) continue;
 
@@ -1063,46 +1055,44 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                  ctx.lineWidth = 2;
                  ctx.strokeRect(s.x - halfSize, s.y - halfSize, nodeSize, nodeSize);
 
-                 if (showText && skipFactor === 1) {
-                    const effectiveX = getEffectiveX(p.x, p.y);
-                    const vX = Math.round(activeTransform(effectiveX));
-                    const vY = Math.round(activeTransform(p.y));
-                    const isCoprimeTrace = computeBigIsCoprime(p.x, p.y);
+                 const effectiveX = getEffectiveX(p.x, p.y);
+                 const vX = Math.round(activeTransform(effectiveX));
+                 const vY = Math.round(activeTransform(p.y));
+                 const isCoprimeTrace = computeBigIsCoprime(p.x, p.y);
 
-                    let gcdExactTrace: bigint | null = null;
-                    let val: number;
+                 let gcdExactTrace: bigint | null = null;
+                 let val: number;
 
-                    if (isCoprimeTrace !== null) {
-                      if (!isCoprimeTrace) {
-                        gcdExactTrace = computeBigGcdValue(p.x, p.y);
-                      }
-                      if (gcdExactTrace !== null) {
-                        val = gcdExactTrace > MAX_SAFE_BIGINT ? Number.MAX_SAFE_INTEGER : Number(gcdExactTrace);
-                      } else {
-                        val = isCoprimeTrace ? 1 : 2;
-                      }
-                    } else {
-                      val = gcd(vX, vY);
-                    }
+                 if (isCoprimeTrace !== null) {
+                   if (!isCoprimeTrace) {
+                     gcdExactTrace = computeBigGcdValue(p.x, p.y);
+                   }
+                   if (gcdExactTrace !== null) {
+                     val = gcdExactTrace > MAX_SAFE_BIGINT ? Number.MAX_SAFE_INTEGER : Number(gcdExactTrace);
+                   } else {
+                     val = isCoprimeTrace ? 1 : 2;
+                   }
+                 } else {
+                   val = gcd(vX, vY);
+                 }
 
-                    const bigLabelTrace = gcdExactTrace !== null && gcdExactTrace > MAX_SAFE_BIGINT
-                      ? gcdExactTrace.toString()
-                      : null;
-                    const label = (gcdExactTrace !== null ? gcdExactTrace > 1n : val > 1)
-                      ? makeLabel(val, bigLabelTrace, showFactored)
-                      : "";
+                 const bigLabelTrace = gcdExactTrace !== null && gcdExactTrace > MAX_SAFE_BIGINT
+                   ? gcdExactTrace.toString()
+                   : null;
+                 const label = (gcdExactTrace !== null ? gcdExactTrace > 1n : val > 1)
+                   ? makeLabel(val, bigLabelTrace, showFactored)
+                   : "";
 
-                    if (label || (p.x===0 && p.y===0)) {
-                        const fontSize = Math.min(nodeSize * 0.4, 16);
-                        pushLabel({
-                          text: p.x === 0 && p.y === 0 ? "0" : label,
-                          x: s.x,
-                          y: s.y,
-                          color: '#000000',
-                          font: labelFont(fontSize),
-                          gKey: `${p.x},${p.y}`
-                        });
-                    }
+                 if (label || (p.x===0 && p.y===0)) {
+                     const fontSize = Math.min(nodeSize * 0.4, 16);
+                     pushLabel({
+                       text: p.x === 0 && p.y === 0 ? "0" : label,
+                       x: s.x,
+                       y: s.y,
+                       color: '#000000',
+                       font: labelFont(fontSize),
+                       gKey: `${p.x},${p.y}`
+                     });
                  }
             }
         }

@@ -79,6 +79,8 @@ interface ControlsProps {
   setBacktraceLimit: (n: number) => void;
   groundRow: number;
   setGroundRow: (n: number) => void;
+  detailZoomCutoff: number;
+  setDetailZoomCutoff: (n: number) => void;
   backtrailLength: number | null;
   savedSlots: SavedSlotSummary[];
   onSaveSlot: (description: string) => void;
@@ -135,6 +137,8 @@ const Controls: React.FC<ControlsProps> = ({
   setBacktraceLimit,
   groundRow,
   setGroundRow,
+  detailZoomCutoff,
+  setDetailZoomCutoff,
   backtrailLength,
   savedSlots,
   onSaveSlot,
@@ -164,6 +168,9 @@ const Controls: React.FC<ControlsProps> = ({
     backtraceLimit.toString()
   );
   const [groundRowInput, setGroundRowInput] = useState(groundRow.toString());
+  const [detailZoomCutoffInput, setDetailZoomCutoffInput] = useState(
+    detailZoomCutoff.toString()
+  );
   const [rowShiftMinInput, setRowShiftMinInput] = useState(
     rowShiftBounds.min.toString()
   );
@@ -201,6 +208,9 @@ const Controls: React.FC<ControlsProps> = ({
   useEffect(() => {
     setGroundRowInput(groundRow.toString());
   }, [groundRow]);
+  useEffect(() => {
+    setDetailZoomCutoffInput(detailZoomCutoff.toString());
+  }, [detailZoomCutoff]);
   useEffect(() => {
     setRowShiftMinInput(rowShiftBounds.min.toString());
     setRowShiftMaxInput(rowShiftBounds.max.toString());
@@ -319,6 +329,15 @@ const Controls: React.FC<ControlsProps> = ({
       setGroundRow(num);
     } else {
       setGroundRowInput(groundRow.toString());
+    }
+  };
+
+  const commitDetailZoomCutoff = () => {
+    const num = Number(detailZoomCutoffInput);
+    if (Number.isFinite(num)) {
+      setDetailZoomCutoff(num);
+    } else {
+      setDetailZoomCutoffInput(detailZoomCutoff.toString());
     }
   };
 
@@ -455,6 +474,66 @@ const Controls: React.FC<ControlsProps> = ({
     ? "bg-gray-900 border-gray-600 text-gray-200 focus:border-blue-500"
     : "bg-gray-50 border-gray-300 text-gray-800 focus:border-blue-500";
 
+  const actionButtons = (
+    <div
+      className={`pointer-events-auto ${
+        showSettings
+          ? "flex flex-row-reverse gap-2"
+          : "flex flex-col gap-2"
+      }`}
+    >
+      {!showSettings && (
+        <button
+          onClick={() => setShowSettings(true)}
+          className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
+          title="Show Settings"
+        >
+          <SlidersHorizontal className="w-5 h-5" />
+        </button>
+      )}
+      {!showSettings && <div className="h-1" />} {/* Spacer */}
+      <button
+        onClick={toggleTheme}
+        className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
+        title="Toggle Theme"
+      >
+        {isDark ? (
+          <Sun className="w-5 h-5" />
+        ) : (
+          <Moon className="w-5 h-5" />
+        )}
+      </button>
+      <button
+        onClick={handleReset}
+        className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
+        title="Reset View"
+      >
+        <RotateCcw className="w-5 h-5" />
+      </button>
+      <button
+        onClick={onResetPaths}
+        className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
+        title="Clear all traced paths"
+      >
+        <Eraser className="w-5 h-5" />
+      </button>
+      <button
+        onClick={handleZoomIn}
+        className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
+        title="Zoom In"
+      >
+        <Plus className="w-5 h-5" />
+      </button>
+      <button
+        onClick={handleZoomOut}
+        className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
+        title="Zoom Out"
+      >
+        <Minus className="w-5 h-5" />
+      </button>
+    </div>
+  );
+
   return (
     <>
       {/* Standalone Coordinates Display (Top Left) */}
@@ -518,10 +597,12 @@ const Controls: React.FC<ControlsProps> = ({
       </div>
 
       <div className="absolute top-4 right-4 flex flex-col gap-2 items-end pointer-events-none select-none">
+        {actionButtons}
+
         {/* Collapsible Info/Settings Panel */}
         {showSettings && (
           <div
-            className={`backdrop-blur-sm p-4 rounded-xl shadow-lg border mb-2 max-w-xs pointer-events-auto transition-colors duration-300 ${panelClass}`}
+            className={`backdrop-blur-sm p-4 rounded-xl shadow-lg border max-w-xs pointer-events-auto transition-colors duration-300 ${panelClass}`}
           >
             <div className="flex items-center justify-between">
               <h1 className="font-bold flex items-center gap-2">
@@ -543,6 +624,14 @@ const Controls: React.FC<ControlsProps> = ({
                   title="Load settings preset"
                 >
                   <FolderOpen className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSettings(false)}
+                  className={`p-1 rounded-md transition-colors ${iconButtonClass}`}
+                  title="Hide settings"
+                >
+                  <Minus className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -1125,6 +1214,30 @@ const Controls: React.FC<ControlsProps> = ({
                         Row targeted by Go to ground/backtrace.
                       </p>
                     </div>
+                    <div>
+                      <label
+                        className={`block text-xs font-medium mb-1 ${
+                          isDark ? "text-gray-400" : "text-gray-500"
+                        }`}
+                      >
+                        Detail zoom cutoff
+                      </label>
+                      <input
+                        type="number"
+                        value={detailZoomCutoffInput}
+                        onChange={(e) =>
+                          setDetailZoomCutoffInput(e.target.value)
+                        }
+                        onBlur={commitDetailZoomCutoff}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" && commitDetailZoomCutoff()
+                        }
+                        className={`w-full px-2 py-1 rounded border ${inputClass} text-sm`}
+                      />
+                      <p className="text-[10px] opacity-60 mt-1">
+                        Zoom needed before graph labels and lines appear.
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1132,56 +1245,6 @@ const Controls: React.FC<ControlsProps> = ({
           </div>
         )}
 
-        {/* Floating Action Buttons */}
-        <div className="flex flex-col gap-2 pointer-events-auto">
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
-            title={showSettings ? "Hide Settings" : "Show Settings"}
-          >
-            <SlidersHorizontal className="w-5 h-5" />
-          </button>
-          <div className="h-1" /> {/* Spacer */}
-          <button
-            onClick={toggleTheme}
-            className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
-            title="Toggle Theme"
-          >
-            {isDark ? (
-              <Sun className="w-5 h-5" />
-            ) : (
-              <Moon className="w-5 h-5" />
-            )}
-          </button>
-          <button
-            onClick={handleReset}
-            className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
-            title="Reset View"
-          >
-            <RotateCcw className="w-5 h-5" />
-          </button>
-          <button
-            onClick={onResetPaths}
-            className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
-            title="Clear all traced paths"
-          >
-            <Eraser className="w-5 h-5" />
-          </button>
-          <button
-            onClick={handleZoomIn}
-            className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
-            title="Zoom In"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
-          <button
-            onClick={handleZoomOut}
-            className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
-            title="Zoom Out"
-          >
-            <Minus className="w-5 h-5" />
-          </button>
-        </div>
       </div>
     </>
   );
