@@ -42,6 +42,8 @@ interface ControlsProps {
   overlayPlotExpr: string;
   setOverlayPlotExpr: (s: string) => void;
   overlayPlotError?: string;
+  frontierWalk: boolean;
+  setFrontierWalk: (b: boolean) => void;
   moveRightExpr: string;
   setMoveRightExpr: (s: string) => void;
   moveRightError?: string;
@@ -96,6 +98,8 @@ const Controls: React.FC<ControlsProps> = ({
   overlayPlotExpr,
   setOverlayPlotExpr,
   overlayPlotError,
+  frontierWalk,
+  setFrontierWalk,
   moveRightExpr,
   setMoveRightExpr,
   moveRightError,
@@ -969,6 +973,20 @@ const Controls: React.FC<ControlsProps> = ({
                       </p>
                     )}
                   </div>
+
+                  <label
+                    className={`flex items-center justify-between text-sm font-medium cursor-pointer ${
+                      isDark ? "text-gray-300" : "text-gray-700"
+                    }`}
+                  >
+                    <span>Frontier walk</span>
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-indigo-600 rounded"
+                      checked={frontierWalk}
+                      onChange={(e) => setFrontierWalk(e.target.checked)}
+                    />
+                  </label>
 
                   <div>
                     <label

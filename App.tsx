@@ -12,7 +12,6 @@ import {
   createTransformFunction,
   gcd,
   gcdBigInt,
-  isPrime,
   splitTopLevelExpressions,
 } from "./utils/math";
 import { getRowOffset, getRowShiftMagnitude, pointKey } from "./utils/grid";
@@ -59,6 +58,7 @@ interface PersistedSettings {
   theme: Theme;
   transformFunc: string;
   overlayPlotExpr: string;
+  frontierWalk: boolean;
   moveRightExpr: string;
   simpleView: boolean;
   wraparound: boolean;
@@ -93,6 +93,7 @@ const DEFAULT_SETTINGS_SNAPSHOT: SettingsSnapshot = {
   viewport: DEFAULT_VIEWPORT,
   transformFunc: "n",
   overlayPlotExpr: "",
+  frontierWalk: false,
   moveRightExpr: DEFAULT_MOVE_RIGHT_EXPR,
   simpleView: false,
   wraparound: false,
@@ -170,6 +171,7 @@ function App() {
   const [theme, setTheme] = useState<Theme>("light");
   const [transformFunc, setTransformFunc] = useState<string>("n");
   const [overlayPlotExpr, setOverlayPlotExpr] = useState<string>("");
+  const [frontierWalk, setFrontierWalk] = useState<boolean>(false);
   const [moveRightExpr, setMoveRightExpr] = useState<string>(
     DEFAULT_MOVE_RIGHT_EXPR
   );
@@ -291,6 +293,9 @@ function App() {
       if (typeof data.overlayPlotExpr === "string") {
         setOverlayPlotExpr(data.overlayPlotExpr);
       }
+      if (typeof data.frontierWalk === "boolean") {
+        setFrontierWalk(data.frontierWalk);
+      }
       if (typeof data.moveRightExpr === "string")
         setMoveRightExpr(data.moveRightExpr);
       if (typeof data.simpleView === "boolean") setSimpleView(data.simpleView);
@@ -364,6 +369,7 @@ function App() {
       viewport,
       transformFunc,
       overlayPlotExpr,
+      frontierWalk,
       moveRightExpr,
       simpleView,
       wraparound,
@@ -388,6 +394,7 @@ function App() {
       viewport,
       transformFunc,
       overlayPlotExpr,
+      frontierWalk,
       moveRightExpr,
       simpleView,
       wraparound,
@@ -501,6 +508,7 @@ function App() {
       theme,
       transformFunc,
       overlayPlotExpr,
+      frontierWalk,
       moveRightExpr,
       simpleView,
       wraparound,
@@ -529,6 +537,7 @@ function App() {
     theme,
     transformFunc,
     overlayPlotExpr,
+    frontierWalk,
     moveRightExpr,
     simpleView,
     wraparound,
@@ -931,6 +940,7 @@ function App() {
         theme={theme}
         transformFunc={transformFunc}
         overlayPlotExpr={overlayPlotExpr}
+        frontierWalk={frontierWalk}
         moveRightPredicate={moveRight.fn}
         simpleView={simpleView}
         showFactored={showFactored}
@@ -958,6 +968,8 @@ function App() {
         overlayPlotExpr={overlayPlotExpr}
         setOverlayPlotExpr={setOverlayPlotExpr}
         overlayPlotError={overlayPlotError}
+        frontierWalk={frontierWalk}
+        setFrontierWalk={setFrontierWalk}
         moveRightExpr={moveRightExpr}
         setMoveRightExpr={setMoveRightExpr}
         moveRightError={moveRight.error}

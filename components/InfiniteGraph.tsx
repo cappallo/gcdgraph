@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, gcdBigInt, gcdIsOneBigInt, formatValue, createTransformFunction, getPrimeFactorCount, splitTopLevelExpressions, TransformFunction } from '../utils/math';
+import { gcd, gcdBigInt, gcdIsOneBigInt, formatValue, createTransformFunction, getPrimeFactorCount, isPrime, splitTopLevelExpressions, TransformFunction } from '../utils/math';
 import { Viewport, Point, Theme } from '../types';
 import { getRowShiftMagnitude } from '../utils/grid';
 import { MovePredicate } from '../utils/moveRule';
@@ -11,6 +11,7 @@ interface InfiniteGraphProps {
   theme: Theme;
   transformFunc: string;
   overlayPlotExpr: string;
+  frontierWalk: boolean;
   moveRightPredicate: MovePredicate;
   simpleView: boolean;
   showFactored: boolean;
@@ -192,6 +193,12 @@ const getOverlayPlotStrokeColor = (index: number, isDark: boolean) => {
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 };
 
+const getFrontierWalkStrokeColor = (isDark: boolean) =>
+  isDark ? '#fecdd3' : '#be123c';
+
+const getFrontierWalkMarkerColor = (isDark: boolean) =>
+  isDark ? '#fcd34d' : '#7c2d12';
+
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const BIGINT_X_CACHE_LIMIT = 100000;
 const BIGINT_Y_CACHE_LIMIT = 100000;
@@ -218,6 +225,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   theme, 
   transformFunc,
   overlayPlotExpr,
+  frontierWalk,
   moveRightPredicate,
   simpleView,
   showFactored,
@@ -478,6 +486,39 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     setTracedPath(findPathToGround(tracedAnchor.current, backtraceConfig));
   }, [backtraceConfig, moveRightPredicate, transformFunc, rowShift, randomizeShift, wraparound]);
 
+  const getEastJumpLength = useCallback((currX: number, currY: number, maxJump: number) => {
+    if (!canFastForward || maxJump <= 1) return 1;
+
+    const p = Math.abs(currY);
+    if (p <= 1) return 1;
+
+    const effectiveX = getEffectiveX(currX, currY);
+    let remaining = p;
+    let jump = Infinity;
+
+    while (remaining > 1) {
+      const factor =
+        remaining % 2 === 0
+          ? 2
+          : (() => {
+              for (let i = 3; i * i <= remaining; i += 2) {
+                if (remaining % i === 0) return i;
+              }
+              return remaining;
+            })();
+
+      const rem = ((effectiveX % factor) + factor) % factor;
+      const skip = rem === 0 ? factor : factor - rem;
+      if (skip < jump) jump = skip;
+      if (jump === 1) break;
+
+      while (remaining % factor === 0) remaining /= factor;
+    }
+
+    if (jump === Infinity) return 1;
+    return Math.max(1, Math.min(jump, maxJump));
+  }, [canFastForward, getEffectiveX]);
+
   // Helper to trace a path forward from a given point
   const traceForward = useCallback((startX: number, startY: number) => {
     const points: Point[] = [{ x: startX, y: startY }];
@@ -500,43 +541,16 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         continue;
       }
 
-      const p = Math.abs(currY);
-      const canJump = canFastForward && p > 1;
-
-      if (canJump) {
-        const effectiveX = getEffectiveX(currX, currY);
-        // Compute min skip across all prime factors of p (handles composite rows).
-        let remaining = p;
-        let jump = Infinity;
-        while (remaining > 1) {
-          const f = remaining % 2 === 0 ? 2 : (() => { for (let i = 3; i * i <= remaining; i += 2) { if (remaining % i === 0) return i; } return remaining; })();
-          const rem = ((effectiveX % f) + f) % f;
-          const skip = rem === 0 ? f : f - rem;
-          if (skip < jump) jump = skip;
-          if (jump === 1) break;
-          while (remaining % f === 0) remaining = remaining / f;
-        }
-        if (jump !== Infinity) {
-          jump = Math.min(jump, maxSteps - stepsUsed);
-          currX += jump;
-          const nextKey = `${currX},${currY}`;
-          if (seen.has(nextKey)) break;
-          stepsUsed += jump;
-          points.push({ x: currX, y: currY });
-          seen.add(nextKey);
-          continue;
-        }
-      }
-
-      currX += 1;
+      const jump = getEastJumpLength(currX, currY, maxSteps - stepsUsed);
+      currX += jump;
       const nextKey = `${currX},${currY}`;
       if (seen.has(nextKey)) break;
-      stepsUsed += 1;
+      stepsUsed += jump;
       points.push({ x: currX, y: currY });
       seen.add(nextKey);
     }
     return points;
-  }, [checkGoesNorth, pathStepLimit, canFastForward, getEffectiveX, getNorthStepY]);
+  }, [checkGoesNorth, pathStepLimit, getEastJumpLength, getNorthStepY]);
 
   // Calculate user-defined custom paths
   const customPaths = useMemo(() => {
@@ -609,6 +623,82 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
     const isWrapDiscontinuity = (p1: Point, p2: Point) =>
       wraparound && p1.x === p2.x && Math.abs(p2.y - p1.y) > 1;
+
+    const buildFrontierWalkPoints = () => {
+      if (!frontierWalk) {
+        return { points: [] as Point[], stepPoints: [] as Point[] };
+      }
+
+      const points: Point[] = [{ x: 2, y: 2 }];
+      const stepPoints: Point[] = [{ x: 2, y: 2 }];
+      let frontierX = 2;
+      let frontierY = 2;
+      const xMargin = Math.max(8, Math.ceil((maxX - minX) * 0.6));
+      const yMargin = Math.max(8, Math.ceil((maxY - minY) * 0.6));
+      const stopX = maxX + xMargin;
+      const stopY = maxY + yMargin;
+      const maxAdvance = Math.max(4000, (stopX - minX + stopY - minY) * 16);
+      const maxRepeats = 256;
+
+      const findNextPrimeRow = (currentY: number) => {
+        const start = Math.max(2, Math.floor(currentY) + 1);
+        for (let candidate = start; candidate <= start + maxAdvance; candidate += 1) {
+          if (isPrime(candidate)) return candidate;
+        }
+        return null;
+      };
+
+      for (let repeat = 0; repeat < maxRepeats; repeat += 1) {
+        if (frontierX > stopX && frontierY > stopY) break;
+
+        const jumpPoint = { x: frontierX + frontierY, y: frontierY };
+        points.push(jumpPoint);
+
+        let currX = jumpPoint.x;
+        let currY = jumpPoint.y;
+        const targetPrimeY = findNextPrimeRow(frontierY);
+        if (targetPrimeY === null) break;
+
+        const seen = new Set<string>([`${currX},${currY}`]);
+        let budget = maxAdvance;
+        let completedSegment = false;
+
+        while (budget > 0) {
+          const goesNorth = checkGoesNorth(currX, currY);
+          if (currY === targetPrimeY && goesNorth) {
+            completedSegment = true;
+            stepPoints.push({ x: currX, y: currY });
+            break;
+          }
+
+          let nextX = currX;
+          let nextY = currY;
+          let cost = 1;
+
+          if (goesNorth) {
+            nextY = getNorthStepY(currX, currY);
+          } else {
+            cost = getEastJumpLength(currX, currY, budget);
+            nextX += cost;
+          }
+
+          const nextKey = `${nextX},${nextY}`;
+          if (seen.has(nextKey)) break;
+
+          points.push({ x: nextX, y: nextY });
+          seen.add(nextKey);
+          currX = nextX;
+          currY = nextY;
+          budget -= cost;
+        }
+
+        frontierX = currX;
+        frontierY = currY;
+        if (!completedSegment) break;
+      }
+
+      return { points, stepPoints };
+    };
 
     // Thicker connections (Twice as wide)
     const gridLineWidth = Math.max(2, zoom / 7.5);
@@ -1103,7 +1193,75 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       });
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, overlayPlotTransforms, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound, shear]);
+    const { points: frontierWalkPoints, stepPoints: frontierStepPoints } = buildFrontierWalkPoints();
+    if (frontierWalkPoints.length > 1) {
+      const frontierPath = new Path2D();
+      let hasSegment = false;
+
+      for (let i = 0; i < frontierWalkPoints.length - 1; i += 1) {
+        const p1 = frontierWalkPoints[i];
+        const p2 = frontierWalkPoints[i + 1];
+
+        if (isWrapDiscontinuity(p1, p2)) continue;
+
+        const p1dx = shear ? p1.x + p1.y : p1.x;
+        const p2dx = shear ? p2.x + p2.y : p2.x;
+        if (p1dx < minX - 1 && p2dx < minX - 1) continue;
+        if (p1dx > maxX + 1 && p2dx > maxX + 1) continue;
+        if (p1.y < minY - 1 && p2.y < minY - 1) continue;
+        if (p1.y > maxY + 1 && p2.y > maxY + 1) continue;
+
+        const s1 = toScreen(p1.x, p1.y);
+        const s2 = toScreen(p2.x, p2.y);
+        frontierPath.moveTo(s1.x, s1.y);
+        frontierPath.lineTo(s2.x, s2.y);
+        hasSegment = true;
+      }
+
+      if (hasSegment) {
+        const dotGap = Math.max(8, Math.round(zoom / 2.4));
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, width, height);
+        ctx.clip();
+        ctx.setLineDash([1, dotGap]);
+        ctx.lineDashOffset = 0;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        ctx.strokeStyle = isDark ? '#000000' : 'rgba(255, 255, 255, 0.96)';
+        ctx.lineWidth = Math.max(6, zoom / 3.2);
+        ctx.stroke(frontierPath);
+
+        ctx.strokeStyle = getFrontierWalkStrokeColor(isDark);
+        ctx.lineWidth = Math.max(3, zoom / 5.5);
+        ctx.stroke(frontierPath);
+
+        const markerRadius = Math.max(nodeSize * 0.6, zoom * 0.22, 5);
+        const markerStroke = Math.max(2, zoom / 12);
+        ctx.setLineDash([]);
+        ctx.fillStyle = getFrontierWalkMarkerColor(isDark);
+        ctx.strokeStyle = isDark ? '#000000' : 'rgba(255, 255, 255, 0.98)';
+        ctx.lineWidth = markerStroke;
+
+        frontierStepPoints.forEach((point) => {
+          const displayX = shear ? point.x + point.y : point.x;
+          if (displayX < minX - 1 || displayX > maxX + 1 || point.y < minY - 1 || point.y > maxY + 1) {
+            return;
+          }
+
+          const screen = toScreen(point.x, point.y);
+          ctx.beginPath();
+          ctx.arc(screen.x, screen.y, markerRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+    }
+
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, overlayPlotTransforms, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound, shear, frontierWalk, checkGoesNorth, getNorthStepY, getEastJumpLength]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {
