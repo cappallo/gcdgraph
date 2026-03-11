@@ -1098,16 +1098,6 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         }
     }
 
-    if (labels.length > 0) {
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      for (const l of labels) {
-        ctx.fillStyle = l.color;
-        ctx.font = l.font;
-        ctx.fillText(l.text, l.x, l.y);
-      }
-    }
-
     if (overlayPlotTransforms.length > 0) {
       const paramMin = minY - 1;
       const paramMax = maxY + 1;
@@ -1244,13 +1234,20 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
           const screen = toScreen(point.x, point.y);
           ctx.beginPath();
           ctx.arc(screen.x, screen.y, markerRadius, 0, Math.PI * 2);
-          ctx.save();
-          ctx.globalAlpha = 0.55;
           ctx.fill();
-          ctx.restore();
           ctx.stroke();
         });
         ctx.restore();
+      }
+    }
+
+    if (labels.length > 0) {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const l of labels) {
+        ctx.fillStyle = l.color;
+        ctx.font = l.font;
+        ctx.fillText(l.text, l.x, l.y);
       }
     }
 
