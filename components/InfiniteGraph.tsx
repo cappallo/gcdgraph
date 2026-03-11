@@ -1244,7 +1244,10 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
           const screen = toScreen(point.x, point.y);
           ctx.beginPath();
           ctx.arc(screen.x, screen.y, markerRadius, 0, Math.PI * 2);
+          ctx.save();
+          ctx.globalAlpha = 0.55;
           ctx.fill();
+          ctx.restore();
           ctx.stroke();
         });
         ctx.restore();
