@@ -83,6 +83,7 @@ interface ControlsProps {
   detailZoomCutoff: number;
   setDetailZoomCutoff: (n: number) => void;
   backtrailLength: number | null;
+  componentDisplay: string;
   savedSlots: SavedSlotSummary[];
   onSaveSlot: (description: string) => void;
   onLoadSlot: (slotId: string) => void;
@@ -143,6 +144,7 @@ const Controls: React.FC<ControlsProps> = ({
   detailZoomCutoff,
   setDetailZoomCutoff,
   backtrailLength,
+  componentDisplay,
   savedSlots,
   onSaveSlot,
   onLoadSlot,
@@ -557,6 +559,7 @@ const Controls: React.FC<ControlsProps> = ({
         <div className="flex gap-6 text-3xl font-bold font-mono tracking-tight">
           <span className="w-32">X: {cursorPos.x}</span>
           <span className="w-32">Y: {cursorPos.y}</span>
+          <span className="w-32">C: {componentDisplay}</span>
         </div>
         <div
           className={`flex gap-6 text-base mt-2 font-mono ${
@@ -869,80 +872,7 @@ const Controls: React.FC<ControlsProps> = ({
               )}
             </div>
 
-            {/* Row Shift Slider */}
-            <div className="mt-4">
-              <label
-                className={`flex justify-between text-xs font-medium mb-1 ${
-                  isDark ? "text-gray-400" : "text-gray-500"
-                }`}
-              >
-                <span>Row Shift (k): {rowShift}</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() =>
-                    setRowShift(Math.max(rowShiftBounds.min, rowShift - 1))
-                  }
-                  className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${
-                    isDark ? "text-gray-300" : "text-gray-600"
-                  }`}
-                >
-                  <Minus className="w-3 h-3" />
-                </button>
-                <input
-                  type="range"
-                  min={rowShiftBounds.min}
-                  max={rowShiftBounds.max}
-                  step="1"
-                  value={rowShift}
-                  onChange={(e) => setRowShift(parseInt(e.target.value))}
-                  className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                />
-                <button
-                  onClick={() =>
-                    setRowShift(Math.min(rowShiftBounds.max, rowShift + 1))
-                  }
-                  className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${
-                    isDark ? "text-gray-300" : "text-gray-600"
-                  }`}
-                >
-                  <Plus className="w-3 h-3" />
-                </button>
-              </div>
-              <p className="text-[9px] opacity-50 mt-1">
-                Shifts x by k for rows [-k, k]
-              </p>
-            </div>
-
             <div className="mt-4 space-y-2">
-              <label
-                className={`flex items-center justify-between text-sm font-medium cursor-pointer ${
-                  isDark ? "text-gray-300" : "text-gray-700"
-                }`}
-              >
-                <span>Randomize shift</span>
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-indigo-600 rounded"
-                  checked={randomizeShift}
-                  onChange={(e) => setRandomizeShift(e.target.checked)}
-                />
-              </label>
-
-              <label
-                className={`flex items-center justify-between text-sm font-medium cursor-pointer ${
-                  isDark ? "text-gray-300" : "text-gray-700"
-                }`}
-              >
-                <span>Shift lock</span>
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-indigo-600 rounded"
-                  checked={shiftLock}
-                  onChange={(e) => setShiftLock(e.target.checked)}
-                />
-              </label>
-
               <label
                 className={`flex items-center justify-between text-sm font-medium cursor-pointer ${
                   isDark ? "text-gray-300" : "text-gray-700"
@@ -1065,6 +995,78 @@ const Controls: React.FC<ControlsProps> = ({
 
               {showAdvanced && (
                 <div className="mt-3 space-y-3 text-sm">
+                  <div>
+                    <label
+                      className={`flex justify-between text-xs font-medium mb-1 ${
+                        isDark ? "text-gray-400" : "text-gray-500"
+                      }`}
+                    >
+                      <span>Row Shift (k): {rowShift}</span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() =>
+                          setRowShift(Math.max(rowShiftBounds.min, rowShift - 1))
+                        }
+                        className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${
+                          isDark ? "text-gray-300" : "text-gray-600"
+                        }`}
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <input
+                        type="range"
+                        min={rowShiftBounds.min}
+                        max={rowShiftBounds.max}
+                        step="1"
+                        value={rowShift}
+                        onChange={(e) => setRowShift(parseInt(e.target.value))}
+                        className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                      />
+                      <button
+                        onClick={() =>
+                          setRowShift(Math.min(rowShiftBounds.max, rowShift + 1))
+                        }
+                        className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 ${
+                          isDark ? "text-gray-300" : "text-gray-600"
+                        }`}
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <p className="text-[9px] opacity-50 mt-1">
+                      Shifts x by k for rows [-k, k]
+                    </p>
+                  </div>
+
+                  <label
+                    className={`flex items-center justify-between text-sm font-medium cursor-pointer ${
+                      isDark ? "text-gray-300" : "text-gray-700"
+                    }`}
+                  >
+                    <span>Randomize shift</span>
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-indigo-600 rounded"
+                      checked={randomizeShift}
+                      onChange={(e) => setRandomizeShift(e.target.checked)}
+                    />
+                  </label>
+
+                  <label
+                    className={`flex items-center justify-between text-sm font-medium cursor-pointer ${
+                      isDark ? "text-gray-300" : "text-gray-700"
+                    }`}
+                  >
+                    <span>Shift lock</span>
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-indigo-600 rounded"
+                      checked={shiftLock}
+                      onChange={(e) => setShiftLock(e.target.checked)}
+                    />
+                  </label>
+
                   <div>
                     <label
                       className={`block text-xs font-medium mb-1 ${

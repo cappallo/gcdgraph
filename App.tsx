@@ -21,7 +21,14 @@ import {
   compileMoveRightPredicate,
   DEFAULT_MOVE_RIGHT_EXPR,
 } from "./utils/moveRule";
-import { findGroundPoint, traceForwardEndpoint, BacktraceConfig } from "./utils/backtrace";
+import {
+  findGroundPoint,
+  findPrimeRowAnchorPoint,
+  traceForwardEndpoint,
+  BacktraceConfig,
+} from "./utils/backtrace";
+
+type ComponentLookupModule = typeof import("./utils/componentLookup");
 
 const STORAGE_KEY = "gcdgraph-settings";
 const SETTINGS_SLOTS_KEY = "gcdgraph-settings-slots";
@@ -32,6 +39,7 @@ const DEFAULT_GROUND_ROW = 2;
 const DEFAULT_DETAIL_ZOOM_CUTOFF = 20;
 const MAX_HIGHLIGHT_POINTS = 500;
 const MAX_SAVED_NODES = 5000;
+const COMPONENT_ANCHOR_TRACE_LIMIT = 1_000_000;
 
 const DEFAULT_AUTO_HIGHLIGHT_EXPR = "(n^3, n^2)";
 const DEFAULT_MANUAL_NODES: Point[] = [
@@ -226,6 +234,9 @@ function App() {
   const [savedSlots, setSavedSlots] = useState<SavedSettingsSlot[]>([]);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [slotsLoaded, setSlotsLoaded] = useState(false);
+  const [componentLookupModule, setComponentLookupModule] =
+    useState<ComponentLookupModule | null>(null);
+  const componentLookupCacheRef = useRef<Map<string, string>>(new Map());
 
   const rowShiftRef = useRef(rowShift);
   const randomizeShiftRef = useRef(randomizeShift);
@@ -720,6 +731,133 @@ function App() {
     [moveRightExpr]
   );
 
+  const isStandardComponentBaseCase = useMemo(() => {
+    const transformToken = transformFunc.trim().toLowerCase();
+    return (
+      moveRight.fn.isDefaultCoprimeRule === true &&
+      (transformToken === "" || transformToken === "n" || transformToken === "x") &&
+      rowShift === 0 &&
+      !randomizeShift &&
+      !shear &&
+      !wraparound
+    );
+  }, [
+    moveRight.fn.isDefaultCoprimeRule,
+    randomizeShift,
+    rowShift,
+    shear,
+    transformFunc,
+    wraparound,
+  ]);
+
+  useEffect(() => {
+    componentLookupCacheRef.current.clear();
+  }, [componentLookupModule]);
+
+  useEffect(() => {
+    if (!isStandardComponentBaseCase || componentLookupModule) return;
+
+    let cancelled = false;
+    import("./utils/componentLookup").then((mod) => {
+      if (!cancelled) setComponentLookupModule(mod);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [componentLookupModule, isStandardComponentBaseCase]);
+
+  const componentDisplay = useMemo(() => {
+    const isStandardBaseCase = isStandardComponentBaseCase;
+
+    const cache = componentLookupCacheRef.current;
+    const cacheKey = [
+      cursorPos.x,
+      cursorPos.y,
+      spfTransform ? 1 : 0,
+      isStandardBaseCase ? 1 : 0,
+      componentLookupModule ? 1 : 0,
+    ].join("|");
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    let nextDisplay = "n/a";
+
+    if (isStandardBaseCase) {
+      if (!componentLookupModule) {
+        nextDisplay = "loading...";
+      } else {
+        const getEffectiveX = (gx: number, _gy: number) => gx;
+        const checkGoesNorth = (gx: number, gy: number) => {
+          const x = Math.round(gx);
+          const y = Math.round(gy);
+          const ruleY = spfTransform ? getSmallestPrimeFactor(y) : y;
+          return gcd(x, ruleY) !== 1;
+        };
+        const getNorthStepY = (_currX: number, currY: number) => currY + 1;
+
+        const componentConfig: BacktraceConfig = {
+          checkGoesNorth,
+          getNorthStepY,
+          getEffectiveX,
+          groundRow: 2,
+          backtraceLimit,
+          canFastForward: true,
+          wraparound: false,
+          transform: (n: number) => n,
+          getDefaultRuleTargetValue: (n: number) =>
+            spfTransform ? getSmallestPrimeFactor(n) : n,
+          isDefaultCoprimeRule: true,
+        };
+
+        const getDisplayForPoint = (target: Point): string | null => {
+          const groundPoint = findGroundPoint(target, componentConfig);
+          if (groundPoint.y !== 2) return null;
+          const componentNumber = componentLookupModule.findComponentNumberAtRow2(
+            groundPoint.x,
+            spfTransform
+          );
+          if (componentNumber !== null) {
+            return componentNumber.toLocaleString();
+          }
+          return `>${componentLookupModule
+            .getKnownComponentCount(spfTransform)
+            .toLocaleString()}`;
+        };
+
+        const cursorPoint = {
+          x: Math.round(cursorPos.x),
+          y: Math.round(cursorPos.y),
+        };
+        nextDisplay =
+          getDisplayForPoint(cursorPoint) ??
+          (() => {
+            const primeAnchor = findPrimeRowAnchorPoint(
+              cursorPoint,
+              Math.min(
+                COMPONENT_ANCHOR_TRACE_LIMIT,
+                Math.max(1_000, backtraceLimit)
+              ),
+              componentConfig
+            );
+            if (!primeAnchor) return "n/a";
+            return getDisplayForPoint(primeAnchor) ?? "n/a";
+          })();
+      }
+    }
+
+    if (cache.size >= 5000) cache.clear();
+    cache.set(cacheKey, nextDisplay);
+    return nextDisplay;
+  }, [
+    backtraceLimit,
+    componentLookupModule,
+    cursorPos.x,
+    cursorPos.y,
+    isStandardComponentBaseCase,
+    spfTransform,
+  ]);
+
   const togglePathStart = useCallback((p: Point) => {
     const key = pointKey(p);
     setManualNodes((prev) => {
@@ -1071,6 +1209,7 @@ function App() {
         detailZoomCutoff={detailZoomCutoff}
         setDetailZoomCutoff={handleDetailZoomCutoff}
         backtrailLength={backtrailLength}
+        componentDisplay={componentDisplay}
         savedSlots={slotSummaries}
         onSaveSlot={handleSaveSlot}
         onLoadSlot={handleLoadSlot}

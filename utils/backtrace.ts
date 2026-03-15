@@ -6,7 +6,7 @@
  *  - App auto-highlight go-to-ground (ground point only)
  */
 import { Point } from '../types';
-import { getSmallestPrimeFactor } from './math';
+import { getSmallestPrimeFactor, isPrime } from './math';
 
 export interface BacktraceConfig {
   /** Returns true if the point steps north, false if it steps east. */
@@ -628,4 +628,58 @@ export function traceForwardEndpoint(
   }
 
   return { x: currX, y: currY };
+}
+
+/**
+ * Follow the deterministic path forward until reaching a prime row `p`
+ * at an x-coordinate divisible by `p`, or until the step budget is exhausted.
+ * Returns the first such anchor point, or null if none is found in time.
+ */
+export function findPrimeRowAnchorPoint(
+  from: Point,
+  maxSteps: number,
+  config: BacktraceConfig,
+): Point | null {
+  const { checkGoesNorth, getNorthStepY, getEffectiveX } = config;
+  const linear = config.transform ? detectLinear(config.transform) : null;
+  let currX = Math.round(from.x);
+  let currY = Math.round(from.y);
+  let steps = 0;
+  const limit = Math.max(0, Math.floor(maxSteps));
+
+  const isPrimeAnchor = (x: number, y: number) => {
+    const row = Math.round(y);
+    if (row < 2 || !isPrime(row)) return false;
+    const effectiveX = Math.round(getEffectiveX(x, y));
+    return ((effectiveX % row) + row) % row === 0;
+  };
+
+  if (isPrimeAnchor(currX, currY)) {
+    return { x: currX, y: currY };
+  }
+
+  while (steps < limit) {
+    if (checkGoesNorth(currX, currY)) {
+      const nextY = getNorthStepY(currX, currY);
+      if (nextY === currY) break;
+      currY = nextY;
+      steps += 1;
+    } else {
+      const skip = eastSkip(currX, currY, config, linear);
+      if (skip !== null && skip > 1) {
+        const bounded = Math.min(skip, limit - steps);
+        currX += bounded;
+        steps += bounded;
+      } else {
+        currX += 1;
+        steps += 1;
+      }
+    }
+
+    if (isPrimeAnchor(currX, currY)) {
+      return { x: currX, y: currY };
+    }
+  }
+
+  return null;
 }
