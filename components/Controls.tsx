@@ -19,6 +19,7 @@ import {
   formatBigIntValue,
   formatValue,
 } from "../utils/math";
+import { DEFAULT_MOVE_RIGHT_EXPR } from "../utils/moveRule";
 
 interface RowShiftBounds {
   min: number;
@@ -88,6 +89,8 @@ interface ControlsProps {
   onDeleteSlot: (slotId: string) => void;
   shear: boolean;
   setShear: (b: boolean) => void;
+  spfTransform: boolean;
+  setSpfTransform: (b: boolean) => void;
 }
 
 const Controls: React.FC<ControlsProps> = ({
@@ -146,6 +149,8 @@ const Controls: React.FC<ControlsProps> = ({
   onDeleteSlot,
   shear,
   setShear,
+  spfTransform,
+  setSpfTransform,
 }) => {
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
@@ -474,6 +479,15 @@ const Controls: React.FC<ControlsProps> = ({
     ? "bg-gray-900 border-gray-600 text-gray-200 focus:border-blue-500"
     : "bg-gray-50 border-gray-300 text-gray-800 focus:border-blue-500";
 
+  const effectiveMoveRightExpr = useMemo(() => {
+    const trimmed = moveRightExpr.trim();
+    const usingDefaultRule = !trimmed || trimmed === DEFAULT_MOVE_RIGHT_EXPR;
+    if (!usingDefaultRule) return trimmed;
+    return spfTransform
+      ? "gcd(f(x),spf(f(y)))==1"
+      : "gcd(f(x),f(y))==1";
+  }, [moveRightExpr, spfTransform]);
+
   const actionButtons = (
     <div
       className={`pointer-events-auto ${
@@ -650,7 +664,7 @@ const Controls: React.FC<ControlsProps> = ({
             >
               <li>
                 <code>(x+1, y)</code> if{" "}
-                <code>{moveRightExpr?.trim() || "gcd(x,y)==1"}</code> (East)
+                <code>{effectiveMoveRightExpr}</code> (East)
               </li>
               <li>
                 <code>(x, y+1)</code> otherwise (North)
@@ -985,6 +999,21 @@ const Controls: React.FC<ControlsProps> = ({
                 />
               </label>
 
+              <label
+                className={`flex items-center justify-between text-sm font-medium cursor-pointer ${
+                  isDark ? "text-gray-300" : "text-gray-700"
+                }`}
+                title="When the default coprime rule is active, use gcd(f(x), spf(f(y))) == 1."
+              >
+                <span>SPF transform</span>
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-indigo-600 rounded"
+                  checked={spfTransform}
+                  onChange={(e) => setSpfTransform(e.target.checked)}
+                />
+              </label>
+
               {simpleView && (
                 <div className="pl-2 pt-1 border-l-2 border-indigo-500/30">
                   <label
@@ -1054,7 +1083,7 @@ const Controls: React.FC<ControlsProps> = ({
                       placeholder="e.g. 3n+1, n^2+1, sqrt(n)"
                     />
                     <p className="text-[10px] opacity-60 mt-1">
-                      Draws dashed overlays through points (f(y), y). Separate multiple formulas with commas.
+                      Draws dashed overlays through points (f(y), y). Exact integer hits are highlighted. Separate multiple formulas with commas.
                     </p>
                     {overlayPlotError && (
                       <p className="text-[10px] text-red-400 mt-1">

@@ -2,6 +2,7 @@
 export interface Point {
   x: number;
   y: number;
+  colorIndex?: number;
 }
 
 export interface Viewport {

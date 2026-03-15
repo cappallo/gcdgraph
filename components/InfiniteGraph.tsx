@@ -1,5 +1,18 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { gcd, gcdBigInt, gcdIsOneBigInt, formatValue, createTransformFunction, getPrimeFactorCount, isPrime, splitTopLevelExpressions, TransformFunction } from '../utils/math';
+import {
+  gcd,
+  gcdBigInt,
+  gcdIsOneBigInt,
+  formatValue,
+  createTransformFunction,
+  getPrimeFactorCount,
+  getPartitionColor,
+  getSmallestPrimeFactor,
+  getSmallestPrimeFactorBigInt,
+  isPrime,
+  splitTopLevelExpressions,
+  TransformFunction,
+} from '../utils/math';
 import { Viewport, Point, Theme } from '../types';
 import { getRowShiftMagnitude } from '../utils/grid';
 import { MovePredicate } from '../utils/moveRule';
@@ -29,6 +42,7 @@ interface InfiniteGraphProps {
   detailZoomCutoff: number;
   onBacktrailChange?: (len: number | null) => void;
   shear: boolean;
+  spfTransform: boolean;
 }
 
 // Calculate a readable text color (light/dark) against a given background color.
@@ -201,10 +215,21 @@ const getFrontierWalkMarkerColor = (isDark: boolean) =>
   isDark ? '#fcd34d' : '#7c2d12';
 
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const OVERLAY_INTEGER_HIT_EPSILON = 1e-9;
 const BIGINT_X_CACHE_LIMIT = 100000;
 const BIGINT_Y_CACHE_LIMIT = 100000;
 const BIGINT_GCD_FLAG_CACHE_LIMIT = 400000;
 const BIGINT_GCD_VALUE_CACHE_LIMIT = 50000;
+
+const snapToInteger = (value: number): number | null => {
+  if (!Number.isFinite(value)) return null;
+  const rounded = Math.round(value);
+  const tolerance = Math.max(
+    OVERLAY_INTEGER_HIT_EPSILON,
+    Math.abs(value) * 1e-12
+  );
+  return Math.abs(value - rounded) <= tolerance ? rounded : null;
+};
 
 const makeLabel = (
   val: number,
@@ -243,7 +268,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   groundRow,
   detailZoomCutoff,
   onBacktrailChange,
-  shear
+  shear,
+  spfTransform
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -282,8 +308,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   }, [overlayPlotExpressions]);
 
   const cacheKey = useMemo(() => {
-    return `${transformFunc}|${rowShift}|${randomizeShift ? 1 : 0}|${shear ? 1 : 0}|${moveRightPredicate.isDefaultCoprimeRule ? 1 : 0}`;
-  }, [moveRightPredicate.isDefaultCoprimeRule, randomizeShift, rowShift, shear, transformFunc]);
+    return `${transformFunc}|${rowShift}|${randomizeShift ? 1 : 0}|${shear ? 1 : 0}|${spfTransform ? 1 : 0}|${moveRightPredicate.isDefaultCoprimeRule ? 1 : 0}`;
+  }, [moveRightPredicate.isDefaultCoprimeRule, randomizeShift, rowShift, shear, spfTransform, transformFunc]);
 
   const bigIntXCache = useRef<Map<bigint, bigint | null>>(new Map());
   const bigIntYCache = useRef<Map<bigint, bigint | null>>(new Map());
@@ -313,6 +339,16 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     }
     return shearedX;
   }, [shear, rowShift, randomizeShift]);
+
+  const getDefaultRuleTargetFromTransformed = useCallback((transformedY: number) => {
+    return spfTransform
+      ? getSmallestPrimeFactor(transformedY)
+      : Math.round(transformedY);
+  }, [spfTransform]);
+
+  const getDefaultRuleTargetValue = useCallback((gy: number) => {
+    return getDefaultRuleTargetFromTransformed(Math.round(activeTransform(gy)));
+  }, [activeTransform, getDefaultRuleTargetFromTransformed]);
 
   const computeBigIsCoprime = useCallback((gx: number, gy: number): boolean | null => {
     if (cacheKeyRef.current !== cacheKey) {
@@ -366,11 +402,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       return null;
     }
 
-    const isOne = gcdIsOneBigInt(vXBig, vYBig);
+    const ruleYBig = spfTransform
+      ? getSmallestPrimeFactorBigInt(vYBig)
+      : vYBig;
+    const isOne = gcdIsOneBigInt(vXBig, ruleYBig);
     if (flagCache.size >= BIGINT_GCD_FLAG_CACHE_LIMIT) flagCache.clear();
     flagCache.set(gcdKey, isOne);
     return isOne;
-  }, [activeTransform, cacheKey, getEffectiveX, moveRightPredicate.isDefaultCoprimeRule]);
+  }, [activeTransform, cacheKey, getEffectiveX, moveRightPredicate.isDefaultCoprimeRule, spfTransform]);
 
   const computeBigGcdValue = useCallback((gx: number, gy: number): bigint | null => {
     if (cacheKeyRef.current !== cacheKey) {
@@ -420,14 +459,17 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       return null;
     }
 
-    const gcdExact = gcdBigInt(vXBig, vYBig);
+    const ruleYBig = spfTransform
+      ? getSmallestPrimeFactorBigInt(vYBig)
+      : vYBig;
+    const gcdExact = gcdBigInt(vXBig, ruleYBig);
     if (valueCache.size >= BIGINT_GCD_VALUE_CACHE_LIMIT) valueCache.clear();
     valueCache.set(gcdKey, gcdExact);
     const isOne = gcdExact === 1n;
     if (flagCache.size >= BIGINT_GCD_FLAG_CACHE_LIMIT) flagCache.clear();
     flagCache.set(gcdKey, isOne);
     return gcdExact;
-  }, [activeTransform, cacheKey, getEffectiveX, moveRightPredicate.isDefaultCoprimeRule]);
+  }, [activeTransform, cacheKey, getEffectiveX, moveRightPredicate.isDefaultCoprimeRule, spfTransform]);
 
   // Offset helper used to keep custom start nodes aligned with row shifts
   // Logic helper: Determine direction based on Coprime rule + Row Shift
@@ -445,15 +487,19 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     // Apply Transform (Number path)
     const vX = Math.round(activeTransform(effectiveX));
     const vY = Math.round(activeTransform(gy));
+    const ruleY = getDefaultRuleTargetFromTransformed(vY);
     
     // Rule: "move right" predicate -> East (return false)
     //       otherwise -> North (return true)
+    if (moveRightPredicate.isDefaultCoprimeRule) {
+      return gcd(vX, ruleY) !== 1;
+    }
     try {
       return !moveRightPredicate(rawX, rawY, activeTransform);
     } catch {
       return gcd(vX, vY) !== 1;
     }
-  }, [activeTransform, computeBigIsCoprime, getEffectiveX, moveRightPredicate]);
+  }, [activeTransform, computeBigIsCoprime, getDefaultRuleTargetFromTransformed, getEffectiveX, moveRightPredicate]);
 
   const getNorthStepY = useCallback(
     (currX: number, currY: number) => {
@@ -475,8 +521,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     canFastForward,
     wraparound,
     transform: (n: number) => Math.round(activeTransform(n)),
+    getDefaultRuleTargetValue,
     isDefaultCoprimeRule: Boolean(moveRightPredicate.isDefaultCoprimeRule),
-  }), [checkGoesNorth, getNorthStepY, getEffectiveX, groundRow, backtraceLimit, canFastForward, wraparound, activeTransform, moveRightPredicate.isDefaultCoprimeRule]);
+  }), [checkGoesNorth, getNorthStepY, getEffectiveX, groundRow, backtraceLimit, canFastForward, wraparound, activeTransform, getDefaultRuleTargetValue, moveRightPredicate.isDefaultCoprimeRule]);
 
   // If the user changes the move rule / transform / row-shift while a backtrace is visible,
   // recompute it so it stays consistent with the new evaluation.
@@ -491,23 +538,15 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   const getEastJumpLength = useCallback((currX: number, currY: number, maxJump: number) => {
     if (!canFastForward || maxJump <= 1) return 1;
 
-    const p = Math.abs(currY);
-    if (p <= 1) return 1;
+    const targetValue = Math.abs(getDefaultRuleTargetFromTransformed(currY));
+    if (targetValue <= 1) return 1;
 
     const effectiveX = getEffectiveX(currX, currY);
-    let remaining = p;
+    let remaining = targetValue;
     let jump = Infinity;
 
     while (remaining > 1) {
-      const factor =
-        remaining % 2 === 0
-          ? 2
-          : (() => {
-              for (let i = 3; i * i <= remaining; i += 2) {
-                if (remaining % i === 0) return i;
-              }
-              return remaining;
-            })();
+      const factor = getSmallestPrimeFactor(remaining);
 
       const rem = ((effectiveX % factor) + factor) % factor;
       const skip = rem === 0 ? factor : factor - rem;
@@ -519,7 +558,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
     if (jump === Infinity) return 1;
     return Math.max(1, Math.min(jump, maxJump));
-  }, [canFastForward, getEffectiveX]);
+  }, [canFastForward, getDefaultRuleTargetFromTransformed, getEffectiveX]);
 
   // Helper to trace a path forward from a given point
   const traceForward = useCallback((startX: number, startY: number) => {
@@ -557,10 +596,16 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   // Calculate user-defined custom paths
   const customPaths = useMemo(() => {
     return pathStarts.map(start => {
-      // Deterministic color based on coordinates
-      const hue = ((start.x * 37 + start.y * 19) * 137.508) % 360;
+      const color =
+        typeof start.colorIndex === 'number'
+          ? getPartitionColor(start.colorIndex)
+          : (() => {
+              // Deterministic color based on coordinates
+              const hue = (((start.x * 37 + start.y * 19) * 137.508) % 360 + 360) % 360;
+              return `hsl(${hue}, 90%, 55%)`;
+            })();
       return {
-        color: `hsl(${hue}, 90%, 55%)`,
+        color,
         points: traceForward(start.x, start.y)
       };
     });
@@ -744,6 +789,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const needsNumberEval = isCoprime === null || simpleView;
         const vX = needsNumberEval ? Math.round(activeTransform(effectiveX)) : 0;
         const vY = needsNumberEval ? Math.round(activeTransform(gy)) : 0;
+        const ruleY = needsNumberEval ? getDefaultRuleTargetFromTransformed(vY) : 0;
 
         let gcdExact: bigint | null = null;
         let displayVal: number;
@@ -762,7 +808,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             displayVal = isCoprime ? 1 : 2;
           }
         } else {
-          displayVal = gcd(vX, vY);
+          displayVal = moveRightPredicate.isDefaultCoprimeRule
+            ? gcd(vX, ruleY)
+            : gcd(vX, vY);
         }
 
         // Always derive direction from the active move rule.
@@ -770,6 +818,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         let goesNorth: boolean;
         if (isCoprime !== null) {
           goesNorth = !isCoprime;
+        } else if (moveRightPredicate.isDefaultCoprimeRule) {
+          goesNorth = displayVal !== 1;
         } else {
           try {
             goesNorth = !moveRightPredicate(Math.round(effectiveX), Math.round(gy), activeTransform);
@@ -795,7 +845,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
               // Check if val matches the transformed value of X or Y
               // This implies divisibility: displayVal == |vX| means vX divides vY or vice versa in terms of GCD structure
               const absVX = Math.abs(vX);
-              const absVY = Math.abs(vY);
+              const absVY = Math.abs(moveRightPredicate.isDefaultCoprimeRule ? ruleY : vY);
               if (valForSimple !== absVX && valForSimple !== absVY) {
                  hideNode = true;
               }
@@ -920,6 +970,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                 const needsNumberEval = isCoprimePath === null || simpleView;
                 const vX = needsNumberEval ? Math.round(activeTransform(effectiveX)) : 0;
                 const vY = needsNumberEval ? Math.round(activeTransform(p.y)) : 0;
+                const ruleY = needsNumberEval ? getDefaultRuleTargetFromTransformed(vY) : 0;
 
                 let gcdExactPath: bigint | null = null;
                 let val: number;
@@ -938,7 +989,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                     val = isCoprimePath ? 1 : 2;
                   }
                 } else {
-                  val = gcd(vX, vY);
+                  val = moveRightPredicate.isDefaultCoprimeRule
+                    ? gcd(vX, ruleY)
+                    : gcd(vX, vY);
                 }
 
                 // Visibility Logic for Paths (apply same rules)
@@ -955,7 +1008,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                         } else {
                             // Unify logic: Check if gcd equals one of the components
                             const absVX = Math.abs(vX);
-                            const absVY = Math.abs(vY);
+                            const absVY = Math.abs(moveRightPredicate.isDefaultCoprimeRule ? ruleY : vY);
                             if (valForSimple !== absVX && valForSimple !== absVY) {
                                  hideNode = true;
                             }
@@ -1058,6 +1111,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                  const effectiveX = getEffectiveX(p.x, p.y);
                  const vX = Math.round(activeTransform(effectiveX));
                  const vY = Math.round(activeTransform(p.y));
+                 const ruleY = getDefaultRuleTargetFromTransformed(vY);
                  const isCoprimeTrace = computeBigIsCoprime(p.x, p.y);
 
                  let gcdExactTrace: bigint | null = null;
@@ -1073,7 +1127,9 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
                      val = isCoprimeTrace ? 1 : 2;
                    }
                  } else {
-                   val = gcd(vX, vY);
+                   val = moveRightPredicate.isDefaultCoprimeRule
+                     ? gcd(vX, ruleY)
+                     : gcd(vX, vY);
                  }
 
                  const bigLabelTrace = gcdExactTrace !== null && gcdExactTrace > MAX_SAFE_BIGINT
@@ -1099,78 +1155,139 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     }
 
     if (overlayPlotTransforms.length > 0) {
-      const paramMin = minY - 1;
+      const paramMin = Math.max(groundRow, minY - 1);
       const paramMax = maxY + 1;
-      const sampleCount = Math.max(160, Math.ceil(height / 2));
-      const step = (paramMax - paramMin) / sampleCount;
-      const xRange = Math.max(1, maxX - minX);
-      const xMargin = Math.max(6, xRange * 0.5);
-      const maxScreenJump = Math.max(120, width * 0.85);
-      const dashLength = 12;
-      const gapLength = 8;
+      if (paramMin <= paramMax) {
+        const integerMinY = Math.ceil(paramMin);
+        const integerMaxY = Math.floor(paramMax);
+        const sampleCount = Math.max(160, Math.ceil(height / 2));
+        const step = (paramMax - paramMin) / sampleCount;
+        const xRange = Math.max(1, maxX - minX);
+        const xMargin = Math.max(6, xRange * 0.5);
+        const maxScreenJump = Math.max(120, width * 0.85);
+        const maxIntegerHitsPerOverlay = 12000;
+        const dashLength = 12;
+        const gapLength = 8;
 
-      overlayPlotTransforms.forEach(({ transform }, index) => {
-        if (!transform.isValid) return;
+        overlayPlotTransforms.forEach(({ transform }, index) => {
+          if (!transform.isValid) return;
 
-        const plotPath = new Path2D();
-        let prevPoint: { x: number; y: number } | null = null;
-        let hasSegment = false;
+          const plotPath = new Path2D();
+          const integerHitPoints: Point[] = [];
+          let prevPoint: { x: number; y: number } | null = null;
+          let hasSegment = false;
 
-        for (let i = 0; i <= sampleCount; i++) {
-          const yVal = paramMin + step * i;
-          const xVal = transform(yVal);
+          for (let i = 0; i <= sampleCount; i++) {
+            const yVal = paramMin + step * i;
+            const xVal = transform(yVal);
 
-          if (!Number.isFinite(xVal) || xVal < minX - xMargin || xVal > maxX + xMargin) {
-            prevPoint = null;
-            continue;
+            if (!Number.isFinite(xVal) || xVal < minX - xMargin || xVal > maxX + xMargin) {
+              prevPoint = null;
+              continue;
+            }
+
+            const screenPoint = toScreenUnsheared(xVal, yVal);
+            const farOffscreen =
+              screenPoint.x < -width ||
+              screenPoint.x > width * 2 ||
+              screenPoint.y < -height ||
+              screenPoint.y > height * 2;
+
+            if (farOffscreen) {
+              prevPoint = null;
+              continue;
+            }
+
+            if (
+              !prevPoint ||
+              Math.abs(screenPoint.x - prevPoint.x) > maxScreenJump ||
+              Math.abs(screenPoint.y - prevPoint.y) > maxScreenJump
+            ) {
+              plotPath.moveTo(screenPoint.x, screenPoint.y);
+            } else {
+              plotPath.lineTo(screenPoint.x, screenPoint.y);
+              hasSegment = true;
+            }
+
+            prevPoint = screenPoint;
           }
 
-          const screenPoint = toScreenUnsheared(xVal, yVal);
-          const farOffscreen =
-            screenPoint.x < -width ||
-            screenPoint.x > width * 2 ||
-            screenPoint.y < -height ||
-            screenPoint.y > height * 2;
+          for (let gy = integerMinY; gy <= integerMaxY; gy += 1) {
+            if (integerHitPoints.length >= maxIntegerHitsPerOverlay) break;
+            const xVal = transform(gy);
+            const xInt = snapToInteger(xVal);
+            if (xInt === null) continue;
+            if (xInt < minX - 1 || xInt > maxX + 1) continue;
 
-          if (farOffscreen) {
-            prevPoint = null;
-            continue;
+            const screenPoint = toScreenUnsheared(xInt, gy);
+            const farOffscreen =
+              screenPoint.x < -width ||
+              screenPoint.x > width * 2 ||
+              screenPoint.y < -height ||
+              screenPoint.y > height * 2;
+            if (farOffscreen) continue;
+
+            integerHitPoints.push({ x: xInt, y: gy });
           }
 
-          if (
-            !prevPoint ||
-            Math.abs(screenPoint.x - prevPoint.x) > maxScreenJump ||
-            Math.abs(screenPoint.y - prevPoint.y) > maxScreenJump
-          ) {
-            plotPath.moveTo(screenPoint.x, screenPoint.y);
-          } else {
-            plotPath.lineTo(screenPoint.x, screenPoint.y);
-            hasSegment = true;
+          if (!hasSegment && integerHitPoints.length === 0) return;
+
+          const overlayColor = getOverlayPlotStrokeColor(index, isDark);
+
+          if (hasSegment) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, width, height);
+            ctx.clip();
+            ctx.setLineDash([dashLength, gapLength]);
+            ctx.lineDashOffset = 0;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+
+            ctx.strokeStyle = isDark ? 'rgba(17, 24, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+            ctx.lineWidth = 7;
+            ctx.stroke(plotPath);
+
+            ctx.strokeStyle = overlayColor;
+            ctx.lineWidth = 3;
+            ctx.stroke(plotPath);
+            ctx.restore();
           }
 
-          prevPoint = screenPoint;
-        }
+          if (integerHitPoints.length > 0) {
+            const highlightSize = Math.max(nodeSize + 5, zoom * 0.72, 9);
+            const halfHighlight = highlightSize / 2;
 
-        if (!hasSegment) return;
+            ctx.save();
+            ctx.setLineDash([]);
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = isDark ? 'rgba(17, 24, 39, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+            ctx.lineWidth = Math.max(4, zoom / 5.5);
+            integerHitPoints.forEach((point) => {
+              const screen = toScreenUnsheared(point.x, point.y);
+              ctx.strokeRect(
+                screen.x - halfHighlight,
+                screen.y - halfHighlight,
+                highlightSize,
+                highlightSize
+              );
+            });
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, 0, width, height);
-        ctx.clip();
-        ctx.setLineDash([dashLength, gapLength]);
-        ctx.lineDashOffset = 0;
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-
-        ctx.strokeStyle = isDark ? 'rgba(17, 24, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)';
-        ctx.lineWidth = 7;
-        ctx.stroke(plotPath);
-
-        ctx.strokeStyle = getOverlayPlotStrokeColor(index, isDark);
-        ctx.lineWidth = 3;
-        ctx.stroke(plotPath);
-        ctx.restore();
-      });
+            ctx.strokeStyle = overlayColor;
+            ctx.lineWidth = Math.max(2, zoom / 9);
+            integerHitPoints.forEach((point) => {
+              const screen = toScreenUnsheared(point.x, point.y);
+              ctx.strokeRect(
+                screen.x - halfHighlight,
+                screen.y - halfHighlight,
+                highlightSize,
+                highlightSize
+              );
+            });
+            ctx.restore();
+          }
+        });
+      }
     }
 
     const { points: frontierWalkPoints, stepPoints: frontierStepPoints } = buildFrontierWalkPoints();
@@ -1251,7 +1368,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, overlayPlotTransforms, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, degree, moveRightPredicate, wraparound, shear, frontierWalk, checkGoesNorth, getNorthStepY, getEastJumpLength]);
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, overlayPlotTransforms, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, getDefaultRuleTargetFromTransformed, degree, moveRightPredicate, wraparound, shear, frontierWalk, checkGoesNorth, getNorthStepY, getEastJumpLength]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {

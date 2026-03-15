@@ -51,15 +51,85 @@ export const gcd = (a: number, b: number): number => {
   return Number(g);
 };
 
-// Get smallest prime factor
-export const getSmallestPrimeFactor = (n: number): number => {
-  if (n <= 1) return 1;
-  while (n % 2 === 0) return 2;
-  let sqrt = Math.sqrt(n);
-  for (let i = 3; i <= sqrt; i += 2) {
-    if (n % i === 0) return i;
+const SPF_SIEVE_LIMIT = 3_000_000;
+const SMALL_PRIME_FACTOR_CACHE_LIMIT = 100_000;
+const BIGINT_SPF_CACHE_LIMIT = 20_000;
+
+const smallestPrimeFactorCache = new Map<number, number>();
+const smallestPrimeFactorBigIntCache = new Map<bigint, bigint>();
+
+const cacheSmallestPrimeFactor = (n: number, factor: number): number => {
+  if (smallestPrimeFactorCache.size >= SMALL_PRIME_FACTOR_CACHE_LIMIT) {
+    smallestPrimeFactorCache.clear();
   }
-  return n;
+  smallestPrimeFactorCache.set(n, factor);
+  return factor;
+};
+
+const cacheSmallestPrimeFactorBigInt = (n: bigint, factor: bigint): bigint => {
+  if (smallestPrimeFactorBigIntCache.size >= BIGINT_SPF_CACHE_LIMIT) {
+    smallestPrimeFactorBigIntCache.clear();
+  }
+  smallestPrimeFactorBigIntCache.set(n, factor);
+  return factor;
+};
+
+export const getSmallestPrimeFactorBigInt = (nRaw: bigint): bigint => {
+  const n = nRaw < 0n ? -nRaw : nRaw;
+  if (n <= 1n) return 1n;
+
+  const cached = smallestPrimeFactorBigIntCache.get(n);
+  if (cached !== undefined) return cached;
+
+  const smallPrimes = [
+    2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n,
+  ];
+  for (const prime of smallPrimes) {
+    if (n === prime) return cacheSmallestPrimeFactorBigInt(n, prime);
+    if (n % prime === 0n) return cacheSmallestPrimeFactorBigInt(n, prime);
+  }
+
+  if (isProbablePrimeBigInt(n)) {
+    return cacheSmallestPrimeFactorBigInt(n, n);
+  }
+
+  const divisor = pollardRhoBigInt(n);
+  if (divisor === n) {
+    return cacheSmallestPrimeFactorBigInt(n, n);
+  }
+
+  const left = getSmallestPrimeFactorBigInt(divisor);
+  const right = getSmallestPrimeFactorBigInt(n / divisor);
+  return cacheSmallestPrimeFactorBigInt(n, left < right ? left : right);
+};
+
+// Get smallest prime factor using the sieve for small integers and Pollard Rho for larger ones.
+export const getSmallestPrimeFactor = (nRaw: number): number => {
+  if (!Number.isFinite(nRaw)) return NaN;
+
+  const n = Math.floor(Math.abs(nRaw));
+  if (n <= 1) return 1;
+
+  const cached = smallestPrimeFactorCache.get(n);
+  if (cached !== undefined) return cached;
+
+  if (n <= SPF_SIEVE_LIMIT) {
+    ensureSieve(n);
+    const factor = SIEVE_SPF[n] || n;
+    return cacheSmallestPrimeFactor(n, factor);
+  }
+
+  const trialLimit = Math.min(Math.floor(Math.sqrt(n)), SPF_SIEVE_LIMIT);
+  if (trialLimit >= 2) {
+    ensureSieve(trialLimit);
+    for (const prime of SIEVE_PRIMES) {
+      if (prime > trialLimit) break;
+      if (n % prime === 0) return cacheSmallestPrimeFactor(n, prime);
+    }
+  }
+
+  const factor = getSmallestPrimeFactorBigInt(BigInt(n));
+  return cacheSmallestPrimeFactor(n, Number(factor));
 };
 
 export const isComposite = (n: number): boolean => {
@@ -106,6 +176,7 @@ const MAX_PI_N = 3_000_000;
 
 let SIEVE_MAX = 1;
 let SIEVE_IS_COMPOSITE = new Uint8Array(2);
+let SIEVE_SPF = new Uint32Array(2);
 let SIEVE_PI_PREFIX = new Uint32Array(2);
 let SIEVE_PRIMES: number[] = [];
 let PRIME_POWERS_MAX = 0;
@@ -113,28 +184,33 @@ let PRIME_POWERS_LIST: number[] = [];
 
 const buildSieveUpTo = (limit: number): void => {
   const n = Math.max(1, Math.floor(limit));
+  const spf = new Uint32Array(n + 1);
   const isComposite = new Uint8Array(n + 1);
   if (n >= 0) isComposite[0] = 1;
-  if (n >= 1) isComposite[1] = 1;
-
-  for (let p = 2; p * p <= n; p++) {
-    if (isComposite[p]) continue;
-    for (let m = p * p; m <= n; m += p) isComposite[m] = 1;
+  if (n >= 1) {
+    isComposite[1] = 1;
+    spf[1] = 1;
   }
 
   const primes: number[] = [];
   const piPrefix = new Uint32Array(n + 1);
-  let count = 0;
   for (let i = 2; i <= n; i++) {
-    if (!isComposite[i]) {
+    if (spf[i] === 0) {
+      spf[i] = i;
       primes.push(i);
-      count++;
     }
-    piPrefix[i] = count;
+    for (const prime of primes) {
+      const composite = i * prime;
+      if (composite > n || prime > spf[i]) break;
+      spf[composite] = prime;
+      isComposite[composite] = 1;
+    }
+    piPrefix[i] = piPrefix[i - 1] + (spf[i] === i ? 1 : 0);
   }
 
   SIEVE_MAX = n;
   SIEVE_IS_COMPOSITE = isComposite;
+  SIEVE_SPF = spf;
   SIEVE_PI_PREFIX = piPrefix;
   SIEVE_PRIMES = primes;
 };
@@ -298,22 +374,29 @@ const pollardRhoBigInt = (n: bigint): bigint => {
   if (n % 2n === 0n) return 2n;
   if (n % 3n === 0n) return 3n;
 
-  for (let seed = 1n; seed <= 16n; seed += 1n) {
-    let x = 2n + seed;
-    let y = 2n + seed;
-    let d = 1n;
-    const c = seed;
-    const step = (value: bigint) => (value * value + c) % n;
+  const constants = [
+    1n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n,
+  ];
+  const starts = [2n, 3n, 5n, 7n, 11n];
 
-    for (let iter = 0; iter < 20000; iter += 1) {
-      x = step(x);
-      y = step(step(y));
-      const diff = x > y ? x - y : y - x;
-      d = gcdBigInt(diff, n);
+  for (const c of constants) {
+    for (const start of starts) {
+      let x = (start + c) % n;
+      if (x === 0n) x = 2n;
+      let y = x;
+      let d = 1n;
+      const step = (value: bigint) => (value * value + c) % n;
 
-      if (d === 1n) continue;
-      if (d !== n) return d;
-      break;
+      for (let iter = 0; iter < 50_000; iter += 1) {
+        x = step(x);
+        y = step(step(y));
+        const diff = x > y ? x - y : y - x;
+        d = gcdBigInt(diff, n);
+
+        if (d === 1n) continue;
+        if (d !== n) return d;
+        break;
+      }
     }
   }
 
@@ -400,7 +483,7 @@ export const getFactorColor = (n: number): string => {
 // Generate a distinct color for partition paths based on index n
 export const getPartitionColor = (n: number): string => {
   // Use Golden Angle to separate colors visually
-  const hue = (n * 137.508) % 360;
+  const hue = ((n * 137.508) % 360 + 360) % 360;
   return `hsl(${hue}, 85%, 45%)`;
 };
 

@@ -28,6 +28,8 @@ export interface BacktraceConfig {
    * Required for the generalized east-skip when canFastForward is false.
    */
   transform?: (n: number) => number;
+  /** Returns the right-hand operand used by the default coprime rule on row y. */
+  getDefaultRuleTargetValue?: (y: number) => number;
   /** Whether the move-right rule is `gcd(x,y)==1` (default coprime). */
   isDefaultCoprimeRule?: boolean;
   /**
@@ -81,19 +83,20 @@ function detectLinear(f: (n: number) => number): LinearTransform | null {
 /**
  * For the default coprime rule with a LINEAR transform f(n) = a*n + b:
  * Given current effectiveX on row y (where we are going east), return the
- * number of east steps to the NEXT position where gcd(f(x'), f(y)) > 1.
+ * number of east steps to the NEXT position where the default rule goes north.
  *
- * Algorithm: for each distinct prime factor q of |f(y)|, solve
+ * Algorithm: for each distinct prime factor q of the rule's right-hand operand,
+ * solve
  *   a*(effectiveX + delta) + b ≡ 0 (mod q)
  * for the smallest delta > 0. Return the minimum across all factors.
  */
 function linearEastSkip(
   effectiveX: number,
-  gy: number,
+  targetValue: number,
   lin: LinearTransform,
 ): number {
   const { a, b } = lin;
-  const transformedY = Math.abs(a * Math.round(gy) + b);
+  const transformedY = Math.abs(Math.round(targetValue));
   if (transformedY <= 1) return 1;
 
   let V = transformedY;
@@ -160,9 +163,10 @@ function getRootCache(transform: (n: number) => number): Map<number, number[]> {
 function generalEastSkip(
   effectiveX: number,
   gy: number,
+  targetValue: number,
   transform: (n: number) => number,
 ): number | null {
-  const transformedY = Math.abs(Math.round(transform(gy)));
+  const transformedY = Math.abs(Math.round(targetValue));
   if (transformedY <= 1) return null;
 
   const cache = getRootCache(transform);
@@ -206,6 +210,17 @@ function generalEastSkip(
   return bestDelta === Infinity ? null : bestDelta;
 }
 
+function getDefaultRuleTargetAbs(
+  gy: number,
+  config: BacktraceConfig,
+): number | null {
+  const raw =
+    config.getDefaultRuleTargetValue?.(gy) ??
+    config.transform?.(gy);
+  if (!Number.isFinite(raw)) return null;
+  return Math.abs(Math.round(raw));
+}
+
 // ── Unified east-skip entry point ───────────────────────────────────────────
 
 /**
@@ -218,15 +233,16 @@ function eastSkip(
   config: BacktraceConfig,
   linear: LinearTransform | null,
 ): number | null {
+  const targetValue = getDefaultRuleTargetAbs(currY, config);
+
   // Identity-transform fast path — handles ALL y values (prime and composite)
   // by iterating over distinct prime factors of |y|, matching the approach
   // from find_paths.py whiteout_std.
   if (config.canFastForward) {
-    const absY = Math.abs(currY);
-    if (absY <= 1) return null;
+    if (targetValue === null || targetValue <= 1) return null;
     const effectiveX = config.getEffectiveX(currX, currY);
 
-    let remaining = absY;
+    let remaining = targetValue;
     let bestSkip = Infinity;
 
     while (remaining > 1) {
@@ -245,13 +261,14 @@ function eastSkip(
 
   // Generalised skip for the default coprime rule with a known transform.
   if (!config.isDefaultCoprimeRule || !config.transform) return null;
+  if (targetValue === null || targetValue <= 1) return null;
 
   const effectiveX = config.getEffectiveX(currX, currY);
 
   if (linear) {
-    return linearEastSkip(effectiveX, currY, linear);
+    return linearEastSkip(effectiveX, targetValue, linear);
   }
-  return generalEastSkip(effectiveX, currY, config.transform);
+  return generalEastSkip(effectiveX, currY, targetValue, config.transform);
 }
 
 // ── Forward-probe outcome ───────────────────────────────────────────────────
