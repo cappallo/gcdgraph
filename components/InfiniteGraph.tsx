@@ -669,6 +669,29 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       y: -(gy - centerY) * zoom + halfHeight
     });
 
+    const shiftMagnitude = Math.abs(Math.round(rowShift));
+    if (shiftMagnitude > 0) {
+      const frontierRows = [shiftMagnitude + 0.5, -(shiftMagnitude + 0.5)];
+
+      ctx.save();
+      ctx.setLineDash([1, 5]);
+      ctx.lineDashOffset = 0;
+      ctx.strokeStyle = isDark ? 'rgba(156, 163, 175, 0.6)' : 'rgba(107, 114, 128, 0.55)';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+
+      frontierRows.forEach((frontierY) => {
+        if (frontierY < minY - 1 || frontierY > maxY + 1) return;
+        const screenY = toScreen(0, frontierY).y;
+        ctx.beginPath();
+        ctx.moveTo(0, screenY);
+        ctx.lineTo(width, screenY);
+        ctx.stroke();
+      });
+
+      ctx.restore();
+    }
+
     const isWrapDiscontinuity = (p1: Point, p2: Point) =>
       wraparound && p1.x === p2.x && Math.abs(p2.y - p1.y) > 1;
 
@@ -1237,6 +1260,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
           if (!hasSegment && integerHitPoints.length === 0) return;
 
           const overlayColor = getOverlayPlotStrokeColor(index, isDark);
+          const overlayHaloWidth = highlightIntegerHits ? 3.5 : 1.75;
+          const overlayStrokeWidth = highlightIntegerHits ? 1.5 : 0.75;
 
           if (hasSegment) {
             ctx.save();
@@ -1249,11 +1274,11 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             ctx.lineCap = 'round';
 
             ctx.strokeStyle = isDark ? 'rgba(17, 24, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)';
-            ctx.lineWidth = 3.5;
+            ctx.lineWidth = overlayHaloWidth;
             ctx.stroke(plotPath);
 
             ctx.strokeStyle = overlayColor;
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = overlayStrokeWidth;
             ctx.stroke(plotPath);
             ctx.restore();
           }
