@@ -506,16 +506,13 @@ const Controls: React.FC<ControlsProps> = ({
           : "flex flex-col gap-2"
       }`}
     >
-      {!showSettings && (
-        <button
-          onClick={() => setShowSettings(true)}
-          className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
-          title="Show Settings"
-        >
-          <SlidersHorizontal className="w-5 h-5" />
-        </button>
-      )}
-      {!showSettings && <div className="h-1" />} {/* Spacer */}
+      <button
+        onClick={() => setShowSettings((prev) => !prev)}
+        className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
+        title={showSettings ? "Hide Settings" : "Show Settings"}
+      >
+        <SlidersHorizontal className="w-5 h-5" />
+      </button>
       <button
         onClick={toggleTheme}
         className={`p-3 rounded-full shadow-lg active:scale-95 transition-all border ${btnClass}`}
@@ -654,14 +651,6 @@ const Controls: React.FC<ControlsProps> = ({
                   title="Load settings preset"
                 >
                   <FolderOpen className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSettings(false)}
-                  className={`p-1 rounded-md transition-colors ${iconButtonClass}`}
-                  title="Hide settings"
-                >
-                  <Minus className="w-4 h-4" />
                 </button>
               </div>
             </div>

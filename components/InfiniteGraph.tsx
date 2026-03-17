@@ -1249,11 +1249,11 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             ctx.lineCap = 'round';
 
             ctx.strokeStyle = isDark ? 'rgba(17, 24, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)';
-            ctx.lineWidth = 7;
+            ctx.lineWidth = 3.5;
             ctx.stroke(plotPath);
 
             ctx.strokeStyle = overlayColor;
-            ctx.lineWidth = 3;
+            ctx.lineWidth = 1.5;
             ctx.stroke(plotPath);
             ctx.restore();
           }
