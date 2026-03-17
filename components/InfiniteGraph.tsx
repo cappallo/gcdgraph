@@ -5,6 +5,7 @@ import {
   gcdIsOneBigInt,
   formatValue,
   createTransformFunction,
+  isAffineExpression,
   getPrimeFactorCount,
   getPartitionColor,
   getSmallestPrimeFactor,
@@ -304,6 +305,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     return overlayPlotExpressions.map((expr) => ({
       expr,
       transform: createTransformFunction(expr),
+      highlightIntegerHits: !isAffineExpression(expr),
     }));
   }, [overlayPlotExpressions]);
 
@@ -1169,7 +1171,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         const dashLength = 12;
         const gapLength = 8;
 
-        overlayPlotTransforms.forEach(({ transform }, index) => {
+        overlayPlotTransforms.forEach(({ transform, highlightIntegerHits }, index) => {
           if (!transform.isValid) return;
 
           const plotPath = new Path2D();
@@ -1212,22 +1214,24 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             prevPoint = screenPoint;
           }
 
-          for (let gy = integerMinY; gy <= integerMaxY; gy += 1) {
-            if (integerHitPoints.length >= maxIntegerHitsPerOverlay) break;
-            const xVal = transform(gy);
-            const xInt = snapToInteger(xVal);
-            if (xInt === null) continue;
-            if (xInt < minX - 1 || xInt > maxX + 1) continue;
+          if (highlightIntegerHits) {
+            for (let gy = integerMinY; gy <= integerMaxY; gy += 1) {
+              if (integerHitPoints.length >= maxIntegerHitsPerOverlay) break;
+              const xVal = transform(gy);
+              const xInt = snapToInteger(xVal);
+              if (xInt === null) continue;
+              if (xInt < minX - 1 || xInt > maxX + 1) continue;
 
-            const screenPoint = toScreenUnsheared(xInt, gy);
-            const farOffscreen =
-              screenPoint.x < -width ||
-              screenPoint.x > width * 2 ||
-              screenPoint.y < -height ||
-              screenPoint.y > height * 2;
-            if (farOffscreen) continue;
+              const screenPoint = toScreenUnsheared(xInt, gy);
+              const farOffscreen =
+                screenPoint.x < -width ||
+                screenPoint.x > width * 2 ||
+                screenPoint.y < -height ||
+                screenPoint.y > height * 2;
+              if (farOffscreen) continue;
 
-            integerHitPoints.push({ x: xInt, y: gy });
+              integerHitPoints.push({ x: xInt, y: gy });
+            }
           }
 
           if (!hasSegment && integerHitPoints.length === 0) return;

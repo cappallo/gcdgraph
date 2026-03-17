@@ -969,3 +969,401 @@ export const createTransformFunction = (
 
   return fn;
 };
+
+export const isAffineExpression = (expression: string): boolean => {
+  if (!expression || !expression.trim()) return true;
+
+  type Token =
+    | { type: "num"; value: number }
+    | { type: "var" }
+    | { type: "op"; value: string }
+    | { type: "func"; name: string }
+    | { type: "lparen" }
+    | { type: "rparen" };
+
+  type AffineForm = {
+    slope: number;
+    intercept: number;
+  };
+
+  const fibPair = (n: bigint): [bigint, bigint] => {
+    if (n === 0n) return [0n, 1n];
+    const [a, b] = fibPair(n >> 1n);
+    const c = a * ((b << 1n) - a);
+    const d = a * a + b * b;
+    if (n & 1n) return [d, c + d];
+    return [c, d];
+  };
+
+  const fibonacci = (n: number): number => {
+    const absN = Math.floor(Math.abs(n));
+    const [f] = fibPair(BigInt(absN));
+    return Number(f);
+  };
+
+  const factorial = (n: number): number => {
+    const absN = Math.floor(Math.abs(n));
+    if (absN <= 1) return 1;
+    let result = 1n;
+    for (let i = 2; i <= absN; i += 1) {
+      result *= BigInt(i);
+    }
+    return Number(result);
+  };
+
+  const funcs: Record<string, (v: number) => number> = {
+    sign: (v: number) => {
+      if (v === 0) return 0;
+      if (v > 0) return 1;
+      if (v < 0) return -1;
+      return 0;
+    },
+    sin: Math.sin,
+    cos: Math.cos,
+    tan: Math.tan,
+    log: Math.log,
+    sqrt: Math.sqrt,
+    abs: Math.abs,
+    floor: Math.floor,
+    ceil: Math.ceil,
+    round: Math.round,
+    exp: Math.exp,
+    fib: fibonacci,
+    fact: factorial,
+    prime: nthPrime,
+    primepower: nthPrimePower,
+    pi: primePi,
+    isprime: (v: number) => (isPrime(v) ? 1 : 0),
+  };
+
+  const precedence: Record<string, number> = {
+    "+": 1,
+    "-": 1,
+    "*": 2,
+    "/": 2,
+    "%": 2,
+    "^": 3,
+    neg: 4,
+  };
+
+  const normalize = (value: number) => {
+    if (!Number.isFinite(value)) return value;
+    if (Math.abs(value) < 1e-12) return 0;
+    return value;
+  };
+
+  const affine = (slope: number, intercept: number): AffineForm | null => {
+    if (!Number.isFinite(slope) || !Number.isFinite(intercept)) return null;
+    return {
+      slope: normalize(slope),
+      intercept: normalize(intercept),
+    };
+  };
+
+  const constant = (value: number) => affine(0, value);
+  const isConstant = (value: AffineForm) => value.slope === 0;
+  const isRightAssoc = (op: string) => op === "^" || op === "neg";
+
+  const tokenize = (src: string): Token[] | null => {
+    const tokens: Token[] = [];
+    let i = 0;
+
+    while (i < src.length) {
+      const ch = src[i];
+      if (ch === " " || ch === "\t" || ch === "\n") {
+        i += 1;
+        continue;
+      }
+      if (/[0-9.]/.test(ch)) {
+        let j = i + 1;
+        while (j < src.length && /[0-9.]/.test(src[j])) j += 1;
+        const num = parseFloat(src.slice(i, j));
+        if (isNaN(num)) return null;
+        tokens.push({ type: "num", value: num });
+        i = j;
+        continue;
+      }
+      if (/[a-zA-Z]/.test(ch)) {
+        let j = i + 1;
+        while (j < src.length && /[a-zA-Z]/.test(src[j])) j += 1;
+        const name = src.slice(i, j).toLowerCase();
+        if (name === "x" || name === "n") {
+          tokens.push({ type: "var" });
+        } else if (name === "pi") {
+          if (src[j] === "(") {
+            tokens.push({ type: "func", name: "pi" });
+          } else {
+            tokens.push({ type: "num", value: Math.PI });
+          }
+        } else if (name === "e") {
+          tokens.push({ type: "num", value: Math.E });
+        } else if (funcs[name]) {
+          tokens.push({ type: "func", name });
+        } else {
+          return null;
+        }
+        i = j;
+        continue;
+      }
+      if ("+-*/%^".includes(ch)) {
+        tokens.push({ type: "op", value: ch });
+        i += 1;
+        continue;
+      }
+      if (ch === "(") {
+        tokens.push({ type: "lparen" });
+        i += 1;
+        continue;
+      }
+      if (ch === ")") {
+        tokens.push({ type: "rparen" });
+        i += 1;
+        continue;
+      }
+      return null;
+    }
+
+    return tokens;
+  };
+
+  const addImplicitMultiplication = (tokens: Token[]): Token[] => {
+    const result: Token[] = [];
+
+    const prevCanMultiply = (token: Token) =>
+      token.type === "num" || token.type === "var" || token.type === "rparen";
+
+    const nextCanMultiply = (token: Token) =>
+      token.type === "num" ||
+      token.type === "var" ||
+      token.type === "func" ||
+      token.type === "lparen";
+
+    for (let i = 0; i < tokens.length; i += 1) {
+      const current = tokens[i];
+      const previous = result[result.length - 1];
+      const isFunctionCall =
+        previous?.type === "func" && current.type === "lparen";
+
+      if (
+        previous &&
+        prevCanMultiply(previous) &&
+        nextCanMultiply(current) &&
+        !isFunctionCall
+      ) {
+        result.push({ type: "op", value: "*" });
+      }
+
+      result.push(current);
+    }
+
+    return result;
+  };
+
+  const toRpn = (tokens: Token[]): Token[] | null => {
+    const output: Token[] = [];
+    const stack: Token[] = [];
+    let previous: Token | null = null;
+
+    for (const token of tokens) {
+      if (token.type === "num" || token.type === "var") {
+        output.push(token);
+      } else if (token.type === "func") {
+        stack.push(token);
+      } else if (token.type === "op") {
+        const isUnary =
+          token.value === "-" &&
+          (previous === null ||
+            previous.type === "op" ||
+            previous.type === "lparen" ||
+            previous.type === "func");
+        const operator = isUnary ? "neg" : token.value;
+
+        while (stack.length > 0) {
+          const top = stack[stack.length - 1];
+          if (top.type === "op") {
+            const topPrecedence = precedence[top.value];
+            const currentPrecedence = precedence[operator];
+            if (
+              topPrecedence > currentPrecedence ||
+              (topPrecedence === currentPrecedence && !isRightAssoc(operator))
+            ) {
+              output.push(stack.pop()!);
+              continue;
+            }
+          } else if (top.type === "func") {
+            output.push(stack.pop()!);
+            continue;
+          }
+          break;
+        }
+
+        stack.push({ type: "op", value: operator });
+      } else if (token.type === "lparen") {
+        stack.push(token);
+      } else if (token.type === "rparen") {
+        while (stack.length > 0 && stack[stack.length - 1].type !== "lparen") {
+          output.push(stack.pop()!);
+        }
+        if (stack.length === 0) return null;
+        stack.pop();
+        if (stack.length > 0 && stack[stack.length - 1].type === "func") {
+          output.push(stack.pop()!);
+        }
+      }
+
+      previous = token;
+    }
+
+    while (stack.length > 0) {
+      const token = stack.pop()!;
+      if (token.type === "lparen" || token.type === "rparen") return null;
+      output.push(token);
+    }
+
+    return output;
+  };
+
+  const tokens = tokenize(expression.replace(/\s+/g, ""));
+  if (!tokens) return false;
+
+  const rpn = toRpn(addImplicitMultiplication(tokens));
+  if (!rpn) return false;
+
+  const stack: AffineForm[] = [];
+
+  for (const token of rpn) {
+    if (token.type === "num") {
+      const value = constant(token.value);
+      if (!value) return false;
+      stack.push(value);
+      continue;
+    }
+
+    if (token.type === "var") {
+      const value = affine(1, 0);
+      if (!value) return false;
+      stack.push(value);
+      continue;
+    }
+
+    if (token.type === "func") {
+      if (stack.length < 1) return false;
+      const input = stack.pop()!;
+      if (!isConstant(input)) return false;
+      const fn = funcs[token.name];
+      if (!fn) return false;
+      const value = constant(fn(input.intercept));
+      if (!value) return false;
+      stack.push(value);
+      continue;
+    }
+
+    if (token.type !== "op") continue;
+    if (token.value === "neg") {
+      if (stack.length < 1) return false;
+      const input = stack.pop()!;
+      const value = affine(-input.slope, -input.intercept);
+      if (!value) return false;
+      stack.push(value);
+      continue;
+    }
+
+    if (stack.length < 2) return false;
+    const right = stack.pop()!;
+    const left = stack.pop()!;
+
+    switch (token.value) {
+      case "+": {
+        const value = affine(
+          left.slope + right.slope,
+          left.intercept + right.intercept
+        );
+        if (!value) return false;
+        stack.push(value);
+        break;
+      }
+      case "-": {
+        const value = affine(
+          left.slope - right.slope,
+          left.intercept - right.intercept
+        );
+        if (!value) return false;
+        stack.push(value);
+        break;
+      }
+      case "*": {
+        if (isConstant(left)) {
+          const value = affine(
+            right.slope * left.intercept,
+            right.intercept * left.intercept
+          );
+          if (!value) return false;
+          stack.push(value);
+          break;
+        }
+        if (isConstant(right)) {
+          const value = affine(
+            left.slope * right.intercept,
+            left.intercept * right.intercept
+          );
+          if (!value) return false;
+          stack.push(value);
+          break;
+        }
+        return false;
+      }
+      case "/": {
+        if (!isConstant(right) || right.intercept === 0) return false;
+        const value = affine(
+          left.slope / right.intercept,
+          left.intercept / right.intercept
+        );
+        if (!value) return false;
+        stack.push(value);
+        break;
+      }
+      case "%": {
+        if (!isConstant(left) || !isConstant(right) || right.intercept === 0) {
+          return false;
+        }
+        const value = constant(left.intercept % right.intercept);
+        if (!value) return false;
+        stack.push(value);
+        break;
+      }
+      case "^": {
+        if (!isConstant(right)) {
+          if (isConstant(left) && left.intercept === 1) {
+            const value = constant(1);
+            if (!value) return false;
+            stack.push(value);
+            break;
+          }
+          return false;
+        }
+
+        if (right.intercept === 0) {
+          const value = constant(1);
+          if (!value) return false;
+          stack.push(value);
+          break;
+        }
+
+        if (right.intercept === 1) {
+          stack.push(left);
+          break;
+        }
+
+        if (!isConstant(left)) return false;
+        const value = constant(Math.pow(left.intercept, right.intercept));
+        if (!value) return false;
+        stack.push(value);
+        break;
+      }
+      default:
+        return false;
+    }
+  }
+
+  return stack.length === 1;
+};

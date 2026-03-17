@@ -465,6 +465,14 @@ const Controls: React.FC<ControlsProps> = ({
     };
   }, [cursorPos.x, cursorPos.y, transformFunc]);
 
+  const kDisplay = useMemo(() => {
+    const raw = cursorPos.x / cursorPos.y;
+    if (Number.isFinite(raw)) return Math.ceil(raw).toString();
+    if (raw === Infinity) return "inf";
+    if (raw === -Infinity) return "-inf";
+    return "n/a";
+  }, [cursorPos.x, cursorPos.y]);
+
   const btnClass = isDark
     ? "bg-gray-800 text-gray-200 hover:bg-gray-700 border-gray-700"
     : "bg-white text-gray-700 hover:bg-gray-50 border-gray-200";
@@ -560,6 +568,11 @@ const Controls: React.FC<ControlsProps> = ({
           <span className="w-32">X: {cursorPos.x}</span>
           <span className="w-32">Y: {cursorPos.y}</span>
           <span className="w-32">C: {componentDisplay}</span>
+        </div>
+        <div className="flex gap-6 text-3xl font-bold font-mono tracking-tight">
+          <span className="w-32" />
+          <span className="w-32" />
+          <span className="w-32">K: {kDisplay}</span>
         </div>
         <div
           className={`flex gap-6 text-base mt-2 font-mono ${
@@ -1085,7 +1098,7 @@ const Controls: React.FC<ControlsProps> = ({
                       placeholder="e.g. 3n+1, n^2+1, sqrt(n)"
                     />
                     <p className="text-[10px] opacity-60 mt-1">
-                      Draws dashed overlays through points (f(y), y). Exact integer hits are highlighted. Separate multiple formulas with commas.
+                      Draws dashed overlays through points (f(y), y). Exact integer hits are highlighted for non-affine formulas. Separate multiple formulas with commas.
                     </p>
                     {overlayPlotError && (
                       <p className="text-[10px] text-red-400 mt-1">

@@ -750,12 +750,14 @@ function App() {
     wraparound,
   ]);
 
+  const canUseExactComponentCache = isStandardComponentBaseCase;
+
   useEffect(() => {
     componentLookupCacheRef.current.clear();
   }, [componentLookupModule]);
 
   useEffect(() => {
-    if (!isStandardComponentBaseCase || componentLookupModule) return;
+    if (!canUseExactComponentCache || componentLookupModule) return;
 
     let cancelled = false;
     import("./utils/componentLookup").then((mod) => {
@@ -765,10 +767,10 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [componentLookupModule, isStandardComponentBaseCase]);
+  }, [canUseExactComponentCache, componentLookupModule]);
 
   const componentDisplay = useMemo(() => {
-    const isStandardBaseCase = isStandardComponentBaseCase;
+    const isStandardBaseCase = canUseExactComponentCache;
 
     const cache = componentLookupCacheRef.current;
     const cacheKey = [
@@ -829,20 +831,16 @@ function App() {
           x: Math.round(cursorPos.x),
           y: Math.round(cursorPos.y),
         };
+        const primeAnchor = findPrimeRowAnchorPoint(
+          cursorPoint,
+          Math.min(
+            COMPONENT_ANCHOR_TRACE_LIMIT,
+            Math.max(1_000, backtraceLimit)
+          ),
+          componentConfig
+        );
         nextDisplay =
-          getDisplayForPoint(cursorPoint) ??
-          (() => {
-            const primeAnchor = findPrimeRowAnchorPoint(
-              cursorPoint,
-              Math.min(
-                COMPONENT_ANCHOR_TRACE_LIMIT,
-                Math.max(1_000, backtraceLimit)
-              ),
-              componentConfig
-            );
-            if (!primeAnchor) return "n/a";
-            return getDisplayForPoint(primeAnchor) ?? "n/a";
-          })();
+          getDisplayForPoint(primeAnchor ?? cursorPoint) ?? "n/a";
       }
     }
 
@@ -851,10 +849,10 @@ function App() {
     return nextDisplay;
   }, [
     backtraceLimit,
+    canUseExactComponentCache,
     componentLookupModule,
     cursorPos.x,
     cursorPos.y,
-    isStandardComponentBaseCase,
     spfTransform,
   ]);
 
