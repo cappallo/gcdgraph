@@ -671,13 +671,13 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
     const shiftMagnitude = Math.abs(Math.round(rowShift));
     if (shiftMagnitude > 0) {
-      const frontierRows = [shiftMagnitude + 0.5, -(shiftMagnitude + 0.5)];
+      const frontierRows = [shiftMagnitude - 0.5, -(shiftMagnitude - 0.5)];
 
       ctx.save();
       ctx.setLineDash([1, 5]);
       ctx.lineDashOffset = 0;
       ctx.strokeStyle = isDark ? 'rgba(156, 163, 175, 0.6)' : 'rgba(107, 114, 128, 0.55)';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1;
       ctx.lineCap = 'round';
 
       frontierRows.forEach((frontierY) => {
