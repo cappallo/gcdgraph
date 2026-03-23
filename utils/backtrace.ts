@@ -575,6 +575,7 @@ function traceForwardPath(
   return null; // did not reach target
 }
 
+// Prefer lower y first (bottommost), then lower x (leftmost) as a tiebreaker.
 function compareBackwardPredecessors(
   a: Point,
   b: Point,
@@ -704,9 +705,10 @@ export function findPathToGround(target: Point, config: BacktraceConfig): Point[
 }
 
 /**
- * Walk backward from `target` by repeatedly choosing the most southern
- * reachable immediate predecessor, breaking ties leftmost by default.
- * Returns `[target]` when no predecessor exists.
+ * Walk backward from `target` by exploring reachable predecessors up to
+ * `maxSteps`, then returning the path to the best bottommost/leftmost
+ * candidate found within that budget. Returns `[target]` when no
+ * predecessor exists.
  */
 export function traceBackwardPath(
   target: Point,
@@ -715,23 +717,64 @@ export function traceBackwardPath(
 ): Point[] {
   const limit = Math.max(0, Math.floor(maxSteps));
   const preferLeftmost = config.partialTraceLeftmost !== false;
-  const points: Point[] = [target];
-  const seen = new Set<string>([`${target.x},${target.y}`]);
-  let curr = target;
+  const targetKey = `${target.x},${target.y}`;
+  const maxVisited = Math.max(limit + 1, Math.floor(config.backtraceLimit));
 
-  for (let steps = 0; steps < limit; steps += 1) {
-    const next = getImmediatePredecessors(curr, config)
-      .filter((candidate) => !seen.has(`${candidate.x},${candidate.y}`))
-      .sort((a, b) => compareBackwardPredecessors(a, b, preferLeftmost))[0];
+  const queue: Array<{ point: Point; depth: number }> = [
+    { point: target, depth: 0 },
+  ];
+  const seen = new Set<string>([targetKey]);
+  const parentByKey = new Map<string, string | null>([[targetKey, null]]);
+  const pointByKey = new Map<string, Point>([[targetKey, target]]);
 
-    if (!next) break;
+  let qHead = 0;
+  let best = target;
 
-    points.push(next);
-    seen.add(`${next.x},${next.y}`);
-    curr = next;
+  while (qHead < queue.length && seen.size < maxVisited) {
+    const { point, depth } = queue[qHead];
+    qHead += 1;
+
+    if (compareBackwardPredecessors(point, best, preferLeftmost) < 0) {
+      best = point;
+    }
+
+    if (depth >= limit) continue;
+
+    const predecessors = getImmediatePredecessors(point, config).sort((a, b) =>
+      compareBackwardPredecessors(a, b, preferLeftmost)
+    );
+
+    for (const predecessor of predecessors) {
+      const key = `${predecessor.x},${predecessor.y}`;
+      if (seen.has(key)) continue;
+
+      seen.add(key);
+      parentByKey.set(key, `${point.x},${point.y}`);
+      pointByKey.set(key, predecessor);
+      queue.push({ point: predecessor, depth: depth + 1 });
+
+      if (compareBackwardPredecessors(predecessor, best, preferLeftmost) < 0) {
+        best = predecessor;
+      }
+
+      if (seen.size >= maxVisited) break;
+    }
   }
 
-  return points;
+  const bestKey = `${best.x},${best.y}`;
+  if (bestKey === targetKey) return [target];
+
+  const reversed: Point[] = [];
+  let currentKey: string | null = bestKey;
+  while (currentKey) {
+    const point = pointByKey.get(currentKey);
+    if (!point) break;
+    reversed.push(point);
+    currentKey = parentByKey.get(currentKey) ?? null;
+  }
+
+  reversed.reverse();
+  return reversed.length > 0 ? reversed : [target];
 }
 
 /**
