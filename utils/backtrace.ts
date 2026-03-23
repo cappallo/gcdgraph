@@ -7,12 +7,17 @@
  */
 import { Point } from '../types';
 import { getSmallestPrimeFactor, isPrime } from './math';
+import { isDefaultStepModifierConfig, type StepDelta } from './stepModifier';
 
 export interface BacktraceConfig {
-  /** Returns true if the point steps north, false if it steps east. */
+  /** Returns true when the point follows the false-step branch. */
   checkGoesNorth: (x: number, y: number) => boolean;
-  /** Returns the y-coordinate after stepping north from (x, y). */
-  getNorthStepY: (x: number, y: number) => number;
+  /** Returns the destination after taking the false-step branch from (x, y). */
+  getFalseStepDestination: (x: number, y: number) => Point;
+  /** Delta used when the move-right condition is true. */
+  trueStepDelta: StepDelta;
+  /** Delta used when the move-right condition is false. */
+  falseStepDelta: StepDelta;
   /** Returns the effective x-coordinate accounting for row shift. */
   getEffectiveX: (gx: number, gy: number) => number;
   /** The y-coordinate of the ground row. */
@@ -221,6 +226,13 @@ function getDefaultRuleTargetAbs(
   return Math.abs(Math.round(raw));
 }
 
+function usesDefaultStepTraversal(config: BacktraceConfig): boolean {
+  return isDefaultStepModifierConfig({
+    trueStep: config.trueStepDelta,
+    falseStep: config.falseStepDelta,
+  });
+}
+
 // ── Unified east-skip entry point ───────────────────────────────────────────
 
 /**
@@ -233,6 +245,7 @@ function eastSkip(
   config: BacktraceConfig,
   linear: LinearTransform | null,
 ): number | null {
+  if (!usesDefaultStepTraversal(config)) return null;
   const targetValue = getDefaultRuleTargetAbs(currY, config);
 
   // Identity-transform fast path — handles ALL y values (prime and composite)
@@ -286,7 +299,8 @@ function probeOutcome(
   config: BacktraceConfig,
   linear: LinearTransform | null,
 ): Outcome {
-  const { checkGoesNorth, getNorthStepY } = config;
+  const { checkGoesNorth, getFalseStepDestination, trueStepDelta } = config;
+  const defaultSteps = usesDefaultStepTraversal(config);
   let currX = startX;
   let currY = groundY;
   let lastXAtTargetRow: number | null = null;
@@ -295,13 +309,16 @@ function probeOutcome(
   while (iters < MAX_PROBE_ITERS) {
     if (currX === target.x && currY === target.y) return 'hit';
     if (currY === target.y) lastXAtTargetRow = currX;
-    if (currY > target.y) break;
-    if (currX > target.x && currY <= target.y) return 'tooRight';
+    if (defaultSteps) {
+      if (currY > target.y) break;
+      if (currX > target.x && currY <= target.y) return 'tooRight';
+    }
 
     if (checkGoesNorth(currX, currY)) {
-      const nextY = getNorthStepY(currX, currY);
-      if (nextY === currY) break;
-      currY = nextY;
+      const next = getFalseStepDestination(currX, currY);
+      if (next.x === currX && next.y === currY) break;
+      currX = next.x;
+      currY = next.y;
       iters += 1;
       continue;
     }
@@ -319,7 +336,8 @@ function probeOutcome(
       continue;
     }
 
-    currX += 1;
+    currX += trueStepDelta.x;
+    currY += trueStepDelta.y;
     iters += 1;
   }
 
@@ -396,7 +414,14 @@ function findGroundByReverseSearch(
   groundY: number,
   config: BacktraceConfig,
 ): Point {
-  const { checkGoesNorth, getNorthStepY, wraparound, backtraceLimit } = config;
+  const {
+    checkGoesNorth,
+    getFalseStepDestination,
+    wraparound,
+    backtraceLimit,
+    trueStepDelta,
+    falseStepDelta,
+  } = config;
   const preferLeftmost = config.partialTraceLeftmost !== false; // default true
   const maxVisited = Math.floor(backtraceLimit);
 
@@ -429,6 +454,17 @@ function findGroundByReverseSearch(
     }
   };
 
+  const enqueue = (px: number, py: number) => {
+    if (py < groundY) return;
+    const key = `${px},${py}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    qX.push(px);
+    qY.push(py);
+    if (py === groundY) updateGround(px);
+    else updatePartial(px, py);
+  };
+
   while (qHead < qX.length && visited < maxVisited) {
     const cx = qX[qHead];
     const cy = qY[qHead];
@@ -437,43 +473,38 @@ function findGroundByReverseSearch(
 
     if (cy <= groundY) continue;
 
-    // ── East predecessor: (cx-1, cy) went east to (cx, cy) ──
-    const epx = cx - 1;
-    if (cy >= groundY && !checkGoesNorth(epx, cy)) {
-      const key = `${epx},${cy}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        qX.push(epx);
-        qY.push(cy);
-        if (cy === groundY) updateGround(epx);
-        else updatePartial(epx, cy);
+    // ── True-branch predecessor ───────────────────────────────────────────
+    const truePredX = cx - trueStepDelta.x;
+    const truePredY = cy - trueStepDelta.y;
+    if (
+      !checkGoesNorth(truePredX, truePredY) &&
+      truePredX + trueStepDelta.x === cx &&
+      truePredY + trueStepDelta.y === cy
+    ) {
+      enqueue(truePredX, truePredY);
+    }
+
+    // ── False-branch predecessor ──────────────────────────────────────────
+    const falsePredX = cx - falseStepDelta.x;
+    const falsePredY = cy - falseStepDelta.y;
+    if (checkGoesNorth(falsePredX, falsePredY)) {
+      const next = getFalseStepDestination(falsePredX, falsePredY);
+      if (next.x === cx && next.y === cy) {
+        enqueue(falsePredX, falsePredY);
       }
     }
 
-    // ── North predecessor: (cx, cy-1) went north to (cx, cy) ──
-    const npy = cy - 1;
-    if (npy >= groundY && checkGoesNorth(cx, npy) && getNorthStepY(cx, npy) === cy) {
-      const key = `${cx},${npy}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        qX.push(cx);
-        qY.push(npy);
-        if (npy === groundY) updateGround(cx);
-        else updatePartial(cx, npy);
-      }
-    }
-
-    // ── Wraparound predecessor: (cx, cx-1) wrapped north to (cx, 0) ──
+    // ── Wrapped false-branch predecessor ──────────────────────────────────
     if (wraparound && cy === 0) {
-      const wy = cx - 1;
-      if (wy >= groundY && checkGoesNorth(cx, wy) && getNorthStepY(cx, wy) === 0) {
-        const key = `${cx},${wy}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          qX.push(cx);
-          qY.push(wy);
-          if (wy === groundY) updateGround(cx);
-          else updatePartial(cx, wy);
+      const wrappedPredX = cx - falseStepDelta.x;
+      const wrappedPredY = cx - falseStepDelta.y;
+      if (
+        (wrappedPredX !== falsePredX || wrappedPredY !== falsePredY) &&
+        checkGoesNorth(wrappedPredX, wrappedPredY)
+      ) {
+        const next = getFalseStepDestination(wrappedPredX, wrappedPredY);
+        if (next.x === cx && next.y === cy) {
+          enqueue(wrappedPredX, wrappedPredY);
         }
       }
     }
@@ -496,7 +527,8 @@ function traceForwardPath(
   config: BacktraceConfig,
   linear: LinearTransform | null,
 ): Point[] | null {
-  const { checkGoesNorth, getNorthStepY } = config;
+  const { checkGoesNorth, getFalseStepDestination, trueStepDelta } = config;
+  const defaultSteps = usesDefaultStepTraversal(config);
   const points: Point[] = [from];
   let currX = from.x;
   let currY = from.y;
@@ -505,10 +537,13 @@ function traceForwardPath(
   while (steps < MAX_PROBE_ITERS) {
     if (currX === target.x && currY === target.y) return points;
     // Safety: if we've clearly overshot, bail.
-    if (currY > target.y || (currX > target.x + 1 && currY >= target.y)) break;
+    if (defaultSteps && (currY > target.y || (currX > target.x + 1 && currY >= target.y))) break;
 
     if (checkGoesNorth(currX, currY)) {
-      currY = getNorthStepY(currX, currY);
+      const next = getFalseStepDestination(currX, currY);
+      if (next.x === currX && next.y === currY) break;
+      currX = next.x;
+      currY = next.y;
       points.push({ x: currX, y: currY });
       steps += 1;
       continue;
@@ -531,12 +566,88 @@ function traceForwardPath(
       continue;
     }
 
-    currX += 1;
+    currX += trueStepDelta.x;
+    currY += trueStepDelta.y;
     points.push({ x: currX, y: currY });
     steps += 1;
   }
 
   return null; // did not reach target
+}
+
+function compareBackwardPredecessors(
+  a: Point,
+  b: Point,
+  preferLeftmost: boolean,
+): number {
+  if (a.y !== b.y) return a.y - b.y;
+  if (a.x !== b.x) return preferLeftmost ? a.x - b.x : b.x - a.x;
+  return 0;
+}
+
+function getImmediatePredecessors(
+  target: Point,
+  config: BacktraceConfig,
+): Point[] {
+  const {
+    checkGoesNorth,
+    getFalseStepDestination,
+    wraparound,
+    trueStepDelta,
+    falseStepDelta,
+  } = config;
+  const predecessors: Point[] = [];
+  const seen = new Set<string>();
+
+  const pushIfValid = (candidate: Point, usesFalseStep: boolean) => {
+    const key = `${candidate.x},${candidate.y}`;
+    if (seen.has(key)) return;
+
+    if (usesFalseStep) {
+      if (!checkGoesNorth(candidate.x, candidate.y)) return;
+      const next = getFalseStepDestination(candidate.x, candidate.y);
+      if (next.x !== target.x || next.y !== target.y) return;
+    } else {
+      if (checkGoesNorth(candidate.x, candidate.y)) return;
+      if (
+        candidate.x + trueStepDelta.x !== target.x ||
+        candidate.y + trueStepDelta.y !== target.y
+      ) {
+        return;
+      }
+    }
+
+    seen.add(key);
+    predecessors.push(candidate);
+  };
+
+  pushIfValid(
+    {
+      x: target.x - trueStepDelta.x,
+      y: target.y - trueStepDelta.y,
+    },
+    false
+  );
+
+  pushIfValid(
+    {
+      x: target.x - falseStepDelta.x,
+      y: target.y - falseStepDelta.y,
+    },
+    true
+  );
+
+  if (wraparound && target.y === 0) {
+    pushIfValid(
+      {
+        x: target.x - falseStepDelta.x,
+        y: target.x - falseStepDelta.y,
+      },
+      true
+    );
+  }
+
+  return predecessors;
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -555,9 +666,11 @@ export function findGroundPoint(target: Point, config: BacktraceConfig): Point {
   // Detect linear transform once for all probes in this call.
   const linear = config.transform ? detectLinear(config.transform) : null;
 
-  // Binary search works for all deterministic north/east rules.
-  const result = findGroundByBinarySearch(target, groundY, config, linear);
-  if (result) return result;
+  if (usesDefaultStepTraversal(config)) {
+    // Binary search works for the default deterministic east/north step pair.
+    const result = findGroundByBinarySearch(target, groundY, config, linear);
+    if (result) return result;
+  }
 
   // Fallback: BFS reverse — returns bottommost-rightmost reachable
   // predecessor (may not be at ground row).
@@ -591,6 +704,37 @@ export function findPathToGround(target: Point, config: BacktraceConfig): Point[
 }
 
 /**
+ * Walk backward from `target` by repeatedly choosing the most southern
+ * reachable immediate predecessor, breaking ties leftmost by default.
+ * Returns `[target]` when no predecessor exists.
+ */
+export function traceBackwardPath(
+  target: Point,
+  maxSteps: number,
+  config: BacktraceConfig,
+): Point[] {
+  const limit = Math.max(0, Math.floor(maxSteps));
+  const preferLeftmost = config.partialTraceLeftmost !== false;
+  const points: Point[] = [target];
+  const seen = new Set<string>([`${target.x},${target.y}`]);
+  let curr = target;
+
+  for (let steps = 0; steps < limit; steps += 1) {
+    const next = getImmediatePredecessors(curr, config)
+      .filter((candidate) => !seen.has(`${candidate.x},${candidate.y}`))
+      .sort((a, b) => compareBackwardPredecessors(a, b, preferLeftmost))[0];
+
+    if (!next) break;
+
+    points.push(next);
+    seen.add(`${next.x},${next.y}`);
+    curr = next;
+  }
+
+  return points;
+}
+
+/**
  * Trace forward from `from` for up to `maxSteps`, returning only the final
  * position (no intermediate points).
  */
@@ -599,7 +743,7 @@ export function traceForwardEndpoint(
   maxSteps: number,
   config: BacktraceConfig,
 ): Point {
-  const { checkGoesNorth, getNorthStepY } = config;
+  const { checkGoesNorth, getFalseStepDestination, trueStepDelta } = config;
   const linear = config.transform ? detectLinear(config.transform) : null;
   let currX = from.x;
   let currY = from.y;
@@ -608,9 +752,10 @@ export function traceForwardEndpoint(
 
   while (steps < limit) {
     if (checkGoesNorth(currX, currY)) {
-      const nextY = getNorthStepY(currX, currY);
-      if (nextY === currY) break; // stuck
-      currY = nextY;
+      const next = getFalseStepDestination(currX, currY);
+      if (next.x === currX && next.y === currY) break; // stuck
+      currX = next.x;
+      currY = next.y;
       steps += 1;
       continue;
     }
@@ -623,7 +768,8 @@ export function traceForwardEndpoint(
       continue;
     }
 
-    currX += 1;
+    currX += trueStepDelta.x;
+    currY += trueStepDelta.y;
     steps += 1;
   }
 
@@ -640,7 +786,7 @@ export function findPrimeRowAnchorPoint(
   maxSteps: number,
   config: BacktraceConfig,
 ): Point | null {
-  const { checkGoesNorth, getNorthStepY, getEffectiveX } = config;
+  const { checkGoesNorth, getFalseStepDestination, getEffectiveX, trueStepDelta } = config;
   const linear = config.transform ? detectLinear(config.transform) : null;
   let currX = Math.round(from.x);
   let currY = Math.round(from.y);
@@ -660,9 +806,10 @@ export function findPrimeRowAnchorPoint(
 
   while (steps < limit) {
     if (checkGoesNorth(currX, currY)) {
-      const nextY = getNorthStepY(currX, currY);
-      if (nextY === currY) break;
-      currY = nextY;
+      const next = getFalseStepDestination(currX, currY);
+      if (next.x === currX && next.y === currY) break;
+      currX = next.x;
+      currY = next.y;
       steps += 1;
     } else {
       const skip = eastSkip(currX, currY, config, linear);
@@ -671,7 +818,8 @@ export function findPrimeRowAnchorPoint(
         currX += bounded;
         steps += bounded;
       } else {
-        currX += 1;
+        currX += trueStepDelta.x;
+        currY += trueStepDelta.y;
         steps += 1;
       }
     }

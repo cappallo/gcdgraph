@@ -27,6 +27,11 @@ import {
   traceForwardEndpoint,
   BacktraceConfig,
 } from "./utils/backtrace";
+import {
+  DEFAULT_FALSE_STEP,
+  DEFAULT_TRUE_STEP,
+  parseStepModifierExpr,
+} from "./utils/stepModifier";
 
 type ComponentLookupModule = typeof import("./utils/componentLookup");
 
@@ -69,6 +74,7 @@ interface PersistedSettings {
   theme: Theme;
   transformFunc: string;
   overlayPlotExpr: string;
+  stepModifierExpr: string;
   frontierWalk: boolean;
   moveRightExpr: string;
   simpleView: boolean;
@@ -106,6 +112,7 @@ const DEFAULT_SETTINGS_SNAPSHOT: SettingsSnapshot = {
   viewport: DEFAULT_VIEWPORT,
   transformFunc: "n",
   overlayPlotExpr: "",
+  stepModifierExpr: "",
   frontierWalk: false,
   moveRightExpr: DEFAULT_MOVE_RIGHT_EXPR,
   simpleView: false,
@@ -190,6 +197,7 @@ function App() {
   const [theme, setTheme] = useState<Theme>("light");
   const [transformFunc, setTransformFunc] = useState<string>("n");
   const [overlayPlotExpr, setOverlayPlotExpr] = useState<string>("");
+  const [stepModifierExpr, setStepModifierExpr] = useState<string>("");
   const [frontierWalk, setFrontierWalk] = useState<boolean>(false);
   const [moveRightExpr, setMoveRightExpr] = useState<string>(
     DEFAULT_MOVE_RIGHT_EXPR
@@ -319,6 +327,9 @@ function App() {
       if (typeof data.overlayPlotExpr === "string") {
         setOverlayPlotExpr(data.overlayPlotExpr);
       }
+      if (typeof data.stepModifierExpr === "string") {
+        setStepModifierExpr(data.stepModifierExpr);
+      }
       if (typeof data.frontierWalk === "boolean") {
         setFrontierWalk(data.frontierWalk);
       }
@@ -407,6 +418,7 @@ function App() {
       viewport,
       transformFunc,
       overlayPlotExpr,
+      stepModifierExpr,
       frontierWalk,
       moveRightExpr,
       simpleView,
@@ -434,6 +446,7 @@ function App() {
       viewport,
       transformFunc,
       overlayPlotExpr,
+      stepModifierExpr,
       frontierWalk,
       moveRightExpr,
       simpleView,
@@ -550,6 +563,7 @@ function App() {
       theme,
       transformFunc,
       overlayPlotExpr,
+      stepModifierExpr,
       frontierWalk,
       moveRightExpr,
       simpleView,
@@ -580,6 +594,7 @@ function App() {
     theme,
     transformFunc,
     overlayPlotExpr,
+    stepModifierExpr,
     frontierWalk,
     moveRightExpr,
     simpleView,
@@ -731,10 +746,16 @@ function App() {
     [moveRightExpr]
   );
 
+  const stepModifiers = useMemo(
+    () => parseStepModifierExpr(stepModifierExpr),
+    [stepModifierExpr]
+  );
+
   const isStandardComponentBaseCase = useMemo(() => {
     const transformToken = transformFunc.trim().toLowerCase();
     return (
       moveRight.fn.isDefaultCoprimeRule === true &&
+      stepModifiers.isDefault &&
       (transformToken === "" || transformToken === "n" || transformToken === "x") &&
       rowShift === 0 &&
       !randomizeShift &&
@@ -746,6 +767,7 @@ function App() {
     randomizeShift,
     rowShift,
     shear,
+    stepModifiers.isDefault,
     transformFunc,
     wraparound,
   ]);
@@ -796,11 +818,16 @@ function App() {
           const ruleY = spfTransform ? getSmallestPrimeFactor(y) : y;
           return gcd(x, ruleY) !== 1;
         };
-        const getNorthStepY = (_currX: number, currY: number) => currY + 1;
+        const getFalseStepDestination = (currX: number, currY: number) => ({
+          x: currX + DEFAULT_FALSE_STEP.x,
+          y: currY + DEFAULT_FALSE_STEP.y,
+        });
 
         const componentConfig: BacktraceConfig = {
           checkGoesNorth,
-          getNorthStepY,
+          getFalseStepDestination,
+          trueStepDelta: DEFAULT_TRUE_STEP,
+          falseStepDelta: DEFAULT_FALSE_STEP,
           getEffectiveX,
           groundRow: 2,
           backtraceLimit,
@@ -926,16 +953,20 @@ function App() {
         }
       };
 
-      const getNorthStepY = (currX: number, currY: number) => {
-        const nextY = currY + 1;
-        if (wraparound && nextY === currX) return 0;
-        return nextY;
+      const getFalseStepDestination = (currX: number, currY: number) => {
+        const nextX = currX + stepModifiers.falseStep.x;
+        const nextY = currY + stepModifiers.falseStep.y;
+        if (wraparound && nextY === nextX) {
+          return { x: nextX, y: 0 };
+        }
+        return { x: nextX, y: nextY };
       };
 
       const canFastForward =
-          moveRightPredicate.isDefaultCoprimeRule === true &&
-          (transformFunc.trim().toLowerCase() === "n" ||
-            transformFunc.trim().toLowerCase() === "x");
+        stepModifiers.isDefault &&
+        moveRightPredicate.isDefaultCoprimeRule === true &&
+        (transformFunc.trim().toLowerCase() === "n" ||
+          transformFunc.trim().toLowerCase() === "x");
 
       const groundY = clampInt(
         groundRow,
@@ -946,7 +977,9 @@ function App() {
 
       const btConfig: BacktraceConfig = {
         checkGoesNorth,
-        getNorthStepY,
+        getFalseStepDestination,
+        trueStepDelta: stepModifiers.trueStep,
+        falseStepDelta: stepModifiers.falseStep,
         getEffectiveX,
         groundRow: groundY,
         backtraceLimit,
@@ -1009,6 +1042,9 @@ function App() {
       rowShift,
       shear,
       spfTransform,
+      stepModifiers.falseStep,
+      stepModifiers.isDefault,
+      stepModifiers.trueStep,
       transformFunc,
       wraparound,
     ]
@@ -1137,6 +1173,7 @@ function App() {
         theme={theme}
         transformFunc={transformFunc}
         overlayPlotExpr={overlayPlotExpr}
+        stepModifiers={stepModifiers}
         frontierWalk={frontierWalk}
         moveRightPredicate={moveRight.fn}
         simpleView={simpleView}
@@ -1167,6 +1204,8 @@ function App() {
         overlayPlotExpr={overlayPlotExpr}
         setOverlayPlotExpr={setOverlayPlotExpr}
         overlayPlotError={overlayPlotError}
+        stepModifierExpr={stepModifierExpr}
+        setStepModifierExpr={setStepModifierExpr}
         frontierWalk={frontierWalk}
         setFrontierWalk={setFrontierWalk}
         moveRightExpr={moveRightExpr}

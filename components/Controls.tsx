@@ -20,6 +20,7 @@ import {
   formatValue,
 } from "../utils/math";
 import { DEFAULT_MOVE_RIGHT_EXPR } from "../utils/moveRule";
+import { parseStepModifierExpr } from "../utils/stepModifier";
 
 interface RowShiftBounds {
   min: number;
@@ -43,6 +44,8 @@ interface ControlsProps {
   overlayPlotExpr: string;
   setOverlayPlotExpr: (s: string) => void;
   overlayPlotError?: string;
+  stepModifierExpr: string;
+  setStepModifierExpr: (s: string) => void;
   frontierWalk: boolean;
   setFrontierWalk: (b: boolean) => void;
   moveRightExpr: string;
@@ -104,6 +107,8 @@ const Controls: React.FC<ControlsProps> = ({
   overlayPlotExpr,
   setOverlayPlotExpr,
   overlayPlotError,
+  stepModifierExpr,
+  setStepModifierExpr,
   frontierWalk,
   setFrontierWalk,
   moveRightExpr,
@@ -157,6 +162,7 @@ const Controls: React.FC<ControlsProps> = ({
   // Local state for input to prevent jitter while typing
   const [funcInput, setFuncInput] = useState(transformFunc);
   const [overlayPlotInput, setOverlayPlotInput] = useState(overlayPlotExpr);
+  const [stepModifierInput, setStepModifierInput] = useState(stepModifierExpr);
   const [moveRightInput, setMoveRightInput] = useState(moveRightExpr);
   const [showSettings, setShowSettings] = useState(true);
   const [autoHighlightInput, setAutoHighlightInput] =
@@ -196,6 +202,9 @@ const Controls: React.FC<ControlsProps> = ({
   useEffect(() => {
     setOverlayPlotInput(overlayPlotExpr);
   }, [overlayPlotExpr]);
+  useEffect(() => {
+    setStepModifierInput(stepModifierExpr);
+  }, [stepModifierExpr]);
   useEffect(() => {
     setMoveRightInput(moveRightExpr);
   }, [moveRightExpr]);
@@ -254,6 +263,10 @@ const Controls: React.FC<ControlsProps> = ({
     setOverlayPlotExpr(overlayPlotInput);
   };
 
+  const commitStepModifier = () => {
+    setStepModifierExpr(stepModifierInput);
+  };
+
   const commitMoveRight = () => {
     setMoveRightExpr(moveRightInput);
   };
@@ -268,6 +281,13 @@ const Controls: React.FC<ControlsProps> = ({
   const handleOverlayPlotKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
       commitOverlayPlot();
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  const handleStepModifierKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      commitStepModifier();
       (e.target as HTMLInputElement).blur();
     }
   };
@@ -498,6 +518,19 @@ const Controls: React.FC<ControlsProps> = ({
       : "gcd(f(x),f(y))==1";
   }, [moveRightExpr, spfTransform]);
 
+  const resolvedStepModifiers = useMemo(
+    () => parseStepModifierExpr(stepModifierExpr),
+    [stepModifierExpr]
+  );
+
+  const formatAxisDestination = (axis: "x" | "y", delta: number) => {
+    if (delta === 0) return axis;
+    return delta > 0 ? `${axis}+${delta}` : `${axis}${delta}`;
+  };
+
+  const formatStepDestination = (dx: number, dy: number) =>
+    `(${formatAxisDestination("x", dx)}, ${formatAxisDestination("y", dy)})`;
+
   const actionButtons = (
     <div
       className={`pointer-events-auto ${
@@ -629,7 +662,7 @@ const Controls: React.FC<ControlsProps> = ({
         {/* Collapsible Info/Settings Panel */}
         {showSettings && (
           <div
-            className={`backdrop-blur-sm p-4 rounded-xl shadow-lg border max-w-xs pointer-events-auto transition-colors duration-300 ${panelClass}`}
+            className={`backdrop-blur-sm p-4 rounded-xl shadow-lg border max-w-xs max-h-[calc(100vh-6.5rem)] overflow-y-auto overscroll-contain pointer-events-auto transition-colors duration-300 ${panelClass}`}
           >
             <div className="flex items-center justify-between">
               <h1 className="font-bold flex items-center gap-2">
@@ -668,11 +701,23 @@ const Controls: React.FC<ControlsProps> = ({
               }`}
             >
               <li>
-                <code>(x+1, y)</code> if{" "}
-                <code>{effectiveMoveRightExpr}</code> (East)
+                <code>
+                  {formatStepDestination(
+                    resolvedStepModifiers.trueStep.x,
+                    resolvedStepModifiers.trueStep.y
+                  )}
+                </code>{" "}
+                if{" "}
+                <code>{effectiveMoveRightExpr}</code>
               </li>
               <li>
-                <code>(x, y+1)</code> otherwise (North)
+                <code>
+                  {formatStepDestination(
+                    resolvedStepModifiers.falseStep.x,
+                    resolvedStepModifiers.falseStep.y
+                  )}
+                </code>{" "}
+                otherwise
               </li>
             </ul>
 
@@ -1271,6 +1316,29 @@ const Controls: React.FC<ControlsProps> = ({
                         Zoom needed before graph labels and lines appear.
                       </p>
                     </div>
+                  </div>
+
+                  <div>
+                    <label
+                      className={`block text-xs font-medium mb-1 ${
+                        isDark ? "text-gray-400" : "text-gray-500"
+                      }`}
+                    >
+                      Step modifier
+                    </label>
+                    <input
+                      type="text"
+                      value={stepModifierInput}
+                      onChange={(e) => setStepModifierInput(e.target.value)}
+                      onBlur={commitStepModifier}
+                      onKeyDown={handleStepModifierKeyDown}
+                      className={`w-full px-2 py-1 rounded border ${inputClass} text-sm font-mono`}
+                      placeholder="(1, 0), (0, 1)"
+                    />
+                    <p className="text-[10px] opacity-60 mt-1">
+                      True-step tuple first, false-step tuple second. Empty uses
+                      the default <code>(1, 0), (0, 1)</code>.
+                    </p>
                   </div>
                 </div>
               )}

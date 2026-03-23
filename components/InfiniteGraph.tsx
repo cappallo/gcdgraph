@@ -17,7 +17,8 @@ import {
 import { Viewport, Point, Theme } from '../types';
 import { getRowShiftMagnitude } from '../utils/grid';
 import { MovePredicate } from '../utils/moveRule';
-import { findPathToGround, BacktraceConfig } from '../utils/backtrace';
+import { findPathToGround, traceBackwardPath, BacktraceConfig } from '../utils/backtrace';
+import type { StepModifierConfig } from '../utils/stepModifier';
 
 interface InfiniteGraphProps {
   viewport: Viewport;
@@ -25,6 +26,7 @@ interface InfiniteGraphProps {
   theme: Theme;
   transformFunc: string;
   overlayPlotExpr: string;
+  stepModifiers: StepModifierConfig;
   frontierWalk: boolean;
   moveRightPredicate: MovePredicate;
   simpleView: boolean;
@@ -246,12 +248,25 @@ const makeLabel = (
   return formatNumberCompact(val);
 };
 
+const buildTracedPathFromConfig = (
+  target: Point,
+  pathStepLimit: number,
+  backtraceConfig: BacktraceConfig
+) => {
+  const groundY = Math.max(1, Math.round(backtraceConfig.groundRow));
+  if (target.y < groundY) {
+    return traceBackwardPath(target, pathStepLimit, backtraceConfig);
+  }
+  return findPathToGround(target, backtraceConfig);
+};
+
 const InfiniteGraph: React.FC<InfiniteGraphProps> = ({ 
   viewport, 
   onViewportChange, 
   theme, 
   transformFunc,
   overlayPlotExpr,
+  stepModifiers,
   frontierWalk,
   moveRightPredicate,
   simpleView,
@@ -286,11 +301,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
   // Trace Path State (Backward from click)
   const [tracedPath, setTracedPath] = useState<Point[] | null>(null);
   const tracedAnchor = useRef<Point | null>(null);
+  const defaultStepTraversal = stepModifiers.isDefault;
   const canFastForward = useMemo(() => {
     const t = transformFunc.trim().toLowerCase();
     const transformAllowsFastForward = t === 'n' || t === 'x';
-    return Boolean(moveRightPredicate.isDefaultCoprimeRule) && transformAllowsFastForward;
-  }, [moveRightPredicate.isDefaultCoprimeRule, transformFunc]);
+    return defaultStepTraversal && Boolean(moveRightPredicate.isDefaultCoprimeRule) && transformAllowsFastForward;
+  }, [defaultStepTraversal, moveRightPredicate.isDefaultCoprimeRule, transformFunc]);
 
   // Create the transform function from string
   const activeTransform = useMemo<TransformFunction>(() => {
@@ -503,20 +519,31 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     }
   }, [activeTransform, computeBigIsCoprime, getDefaultRuleTargetFromTransformed, getEffectiveX, moveRightPredicate]);
 
-  const getNorthStepY = useCallback(
+  const getTrueStepDestination = useCallback(
+    (currX: number, currY: number, multiplier = 1): Point => ({
+      x: currX + stepModifiers.trueStep.x * multiplier,
+      y: currY + stepModifiers.trueStep.y * multiplier,
+    }),
+    [stepModifiers.trueStep.x, stepModifiers.trueStep.y]
+  );
+
+  const getFalseStepDestination = useCallback(
     (currX: number, currY: number) => {
-      const nextY = currY + 1;
-      if (wraparound && nextY === currX) return 0;
-      return nextY;
+      const nextX = currX + stepModifiers.falseStep.x;
+      const nextY = currY + stepModifiers.falseStep.y;
+      if (wraparound && nextY === nextX) return { x: nextX, y: 0 };
+      return { x: nextX, y: nextY };
     },
-    [wraparound]
+    [stepModifiers.falseStep.x, stepModifiers.falseStep.y, wraparound]
   );
 
   // Backtrace configuration, memoised so the effect below reruns only when
   // relevant inputs actually change.
   const backtraceConfig: BacktraceConfig = useMemo(() => ({
     checkGoesNorth,
-    getNorthStepY,
+    getFalseStepDestination,
+    trueStepDelta: stepModifiers.trueStep,
+    falseStepDelta: stepModifiers.falseStep,
     getEffectiveX,
     groundRow,
     backtraceLimit,
@@ -525,7 +552,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     transform: (n: number) => Math.round(activeTransform(n)),
     getDefaultRuleTargetValue,
     isDefaultCoprimeRule: Boolean(moveRightPredicate.isDefaultCoprimeRule),
-  }), [checkGoesNorth, getNorthStepY, getEffectiveX, groundRow, backtraceLimit, canFastForward, wraparound, activeTransform, getDefaultRuleTargetValue, moveRightPredicate.isDefaultCoprimeRule]);
+  }), [checkGoesNorth, getFalseStepDestination, stepModifiers.trueStep, stepModifiers.falseStep, getEffectiveX, groundRow, backtraceLimit, canFastForward, wraparound, activeTransform, getDefaultRuleTargetValue, moveRightPredicate.isDefaultCoprimeRule]);
 
   // If the user changes the move rule / transform / row-shift while a backtrace is visible,
   // recompute it so it stays consistent with the new evaluation.
@@ -534,8 +561,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       setTracedPath(null);
       return;
     }
-    setTracedPath(findPathToGround(tracedAnchor.current, backtraceConfig));
-  }, [backtraceConfig, moveRightPredicate, transformFunc, rowShift, randomizeShift, wraparound]);
+    setTracedPath(
+      buildTracedPathFromConfig(
+        tracedAnchor.current,
+        pathStepLimit,
+        backtraceConfig
+      )
+    );
+  }, [backtraceConfig, moveRightPredicate, pathStepLimit, transformFunc, rowShift, randomizeShift, wraparound]);
 
   const getEastJumpLength = useCallback((currX: number, currY: number, maxJump: number) => {
     if (!canFastForward || maxJump <= 1) return 1;
@@ -572,12 +605,13 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     let stepsUsed = 0;
 
     while (stepsUsed < maxSteps) {
-      const goesNorth = checkGoesNorth(currX, currY);
-      if (goesNorth) {
-        const nextY = getNorthStepY(currX, currY);
-        const nextKey = `${currX},${nextY}`;
+      const usesFalseStep = checkGoesNorth(currX, currY);
+      if (usesFalseStep) {
+        const next = getFalseStepDestination(currX, currY);
+        const nextKey = `${next.x},${next.y}`;
         if (seen.has(nextKey)) break;
-        currY = nextY;
+        currX = next.x;
+        currY = next.y;
         stepsUsed += 1;
         points.push({ x: currX, y: currY });
         seen.add(nextKey);
@@ -585,15 +619,17 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
 
       const jump = getEastJumpLength(currX, currY, maxSteps - stepsUsed);
-      currX += jump;
-      const nextKey = `${currX},${currY}`;
+      const next = getTrueStepDestination(currX, currY, jump);
+      const nextKey = `${next.x},${next.y}`;
       if (seen.has(nextKey)) break;
+      currX = next.x;
+      currY = next.y;
       stepsUsed += jump;
       points.push({ x: currX, y: currY });
       seen.add(nextKey);
     }
     return points;
-  }, [checkGoesNorth, pathStepLimit, getEastJumpLength, getNorthStepY]);
+  }, [checkGoesNorth, pathStepLimit, getEastJumpLength, getFalseStepDestination, getTrueStepDestination]);
 
   // Calculate user-defined custom paths
   const customPaths = useMemo(() => {
@@ -692,8 +728,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       ctx.restore();
     }
 
-    const isWrapDiscontinuity = (p1: Point, p2: Point) =>
-      wraparound && p1.x === p2.x && Math.abs(p2.y - p1.y) > 1;
+    const isWrapDiscontinuity = (p1: Point, p2: Point) => {
+      if (!wraparound) return false;
+      const baseX = p1.x + stepModifiers.falseStep.x;
+      const baseY = p1.y + stepModifiers.falseStep.y;
+      return baseY === baseX && p2.x === baseX && p2.y === 0;
+    };
 
     const buildFrontierWalkPoints = () => {
       if (!frontierWalk) {
@@ -735,8 +775,8 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
         let completedSegment = false;
 
         while (budget > 0) {
-          const goesNorth = checkGoesNorth(currX, currY);
-          if (currY === targetPrimeY && goesNorth) {
+          const usesFalseStep = checkGoesNorth(currX, currY);
+          if (currY === targetPrimeY && usesFalseStep) {
             completedSegment = true;
             stepPoints.push({ x: currX, y: currY });
             break;
@@ -746,11 +786,15 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
           let nextY = currY;
           let cost = 1;
 
-          if (goesNorth) {
-            nextY = getNorthStepY(currX, currY);
+          if (usesFalseStep) {
+            const next = getFalseStepDestination(currX, currY);
+            nextX = next.x;
+            nextY = next.y;
           } else {
             cost = getEastJumpLength(currX, currY, budget);
-            nextX += cost;
+            const next = getTrueStepDestination(currX, currY, cost);
+            nextX = next.x;
+            nextY = next.y;
           }
 
           const nextKey = `${nextX},${nextY}`;
@@ -840,16 +884,16 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
         // Always derive direction from the active move rule.
         // `checkGoesNorth` already uses the BigInt-precise path for the default coprime rule.
-        let goesNorth: boolean;
+        let usesFalseStep: boolean;
         if (isCoprime !== null) {
-          goesNorth = !isCoprime;
+          usesFalseStep = !isCoprime;
         } else if (moveRightPredicate.isDefaultCoprimeRule) {
-          goesNorth = displayVal !== 1;
+          usesFalseStep = displayVal !== 1;
         } else {
           try {
-            goesNorth = !moveRightPredicate(Math.round(effectiveX), Math.round(gy), activeTransform);
+            usesFalseStep = !moveRightPredicate(Math.round(effectiveX), Math.round(gy), activeTransform);
           } catch {
-            goesNorth = displayVal !== 1;
+            usesFalseStep = displayVal !== 1;
           }
         }
         
@@ -888,14 +932,12 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
             
             ctx.beginPath();
             ctx.moveTo(screenX, screenY);
-            
-            if (goesNorth) {
-                const dest = toScreen(gx, gy + 1);
-                ctx.lineTo(dest.x, dest.y);
-            } else {
-                const dest = toScreen(gx + 1, gy);
-                ctx.lineTo(dest.x, dest.y);
-            }
+
+            const destination = usesFalseStep
+              ? getFalseStepDestination(gx, gy)
+              : getTrueStepDestination(gx, gy);
+            const dest = toScreen(destination.x, destination.y);
+            ctx.lineTo(dest.x, dest.y);
             ctx.stroke();
 
             // Node Body
@@ -1180,13 +1222,10 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
     }
 
     if (overlayPlotTransforms.length > 0) {
-      const paramMin = Math.max(groundRow, minY - 1);
+      const paramMin = minY - 1;
       const paramMax = maxY + 1;
       if (paramMin <= paramMax) {
-        const integerMinY = Math.ceil(paramMin);
-        const integerMaxY = Math.floor(paramMax);
         const sampleCount = Math.max(160, Math.ceil(height / 2));
-        const step = (paramMax - paramMin) / sampleCount;
         const xRange = Math.max(1, maxX - minX);
         const xMargin = Math.max(6, xRange * 0.5);
         const maxScreenJump = Math.max(120, width * 0.85);
@@ -1196,6 +1235,14 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
 
         overlayPlotTransforms.forEach(({ transform, highlightIntegerHits }, index) => {
           if (!transform.isValid) return;
+          const overlayParamMin = highlightIntegerHits
+            ? Math.max(1, paramMin)
+            : paramMin;
+          if (overlayParamMin > paramMax) return;
+
+          const integerMinY = Math.ceil(overlayParamMin);
+          const integerMaxY = Math.floor(paramMax);
+          const step = (paramMax - overlayParamMin) / sampleCount;
 
           const plotPath = new Path2D();
           const integerHitPoints: Point[] = [];
@@ -1203,7 +1250,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
           let hasSegment = false;
 
           for (let i = 0; i <= sampleCount; i++) {
-            const yVal = paramMin + step * i;
+            const yVal = overlayParamMin + step * i;
             const xVal = transform(yVal);
 
             if (!Number.isFinite(xVal) || xVal < minX - xMargin || xVal > maxX + xMargin) {
@@ -1397,7 +1444,7 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       }
     }
 
-  }, [viewport, customPaths, tracedPath, theme, activeTransform, overlayPlotTransforms, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, getDefaultRuleTargetFromTransformed, degree, moveRightPredicate, wraparound, shear, frontierWalk, checkGoesNorth, getNorthStepY, getEastJumpLength]);
+  }, [viewport, customPaths, tracedPath, theme, activeTransform, overlayPlotTransforms, simpleView, computeBigIsCoprime, computeBigGcdValue, rowShift, showFactored, getEffectiveX, getDefaultRuleTargetFromTransformed, degree, moveRightPredicate, wraparound, shear, frontierWalk, checkGoesNorth, getFalseStepDestination, getTrueStepDestination, getEastJumpLength, stepModifiers.falseStep.x, stepModifiers.falseStep.y]);
 
   // Render when inputs change instead of continuously looping, to reduce idle CPU.
   useEffect(() => {
@@ -1631,7 +1678,11 @@ const InfiniteGraph: React.FC<InfiniteGraphProps> = ({
       return;
     }
 
-    const path = findPathToGround({ x: gx, y: gy }, backtraceConfig);
+    const path = buildTracedPathFromConfig(
+      { x: gx, y: gy },
+      pathStepLimit,
+      backtraceConfig
+    );
     tracedAnchor.current = { x: gx, y: gy };
     setTracedPath(path);
   };
