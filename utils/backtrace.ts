@@ -586,6 +586,67 @@ function compareBackwardPredecessors(
   return 0;
 }
 
+function getBackwardSearchBounds(
+  target: Point,
+  config: BacktraceConfig,
+): {
+  canPrune: boolean;
+  maxYDrop: number;
+  maxLeftGain: number;
+  maxRightGain: number;
+} {
+  const maxYDrop = Math.max(0, config.trueStepDelta.y, config.falseStepDelta.y);
+  const maxLeftGain = Math.max(0, config.trueStepDelta.x, config.falseStepDelta.x);
+  const maxRightGain = Math.max(0, -config.trueStepDelta.x, -config.falseStepDelta.x);
+
+  // When reverse y is monotone non-increasing, every remaining step can lower y
+  // by at most maxYDrop. Wraparound breaks that only if the search can still
+  // reach row 0, which is impossible when starting below 0 with nonnegative y-steps.
+  const hasMonotoneReverseY =
+    config.trueStepDelta.y >= 0 &&
+    config.falseStepDelta.y >= 0 &&
+    (!config.wraparound || target.y < 0);
+
+  return {
+    canPrune: hasMonotoneReverseY,
+    maxYDrop,
+    maxLeftGain,
+    maxRightGain,
+  };
+}
+
+function canBackwardBranchBeatBest(
+  point: Point,
+  depth: number,
+  limit: number,
+  best: Point,
+  preferLeftmost: boolean,
+  bounds: ReturnType<typeof getBackwardSearchBounds>,
+): boolean {
+  if (!bounds.canPrune) return true;
+
+  const remaining = limit - depth;
+  if (remaining <= 0) {
+    return compareBackwardPredecessors(point, best, preferLeftmost) < 0;
+  }
+
+  const optimisticY = point.y - remaining * bounds.maxYDrop;
+  if (optimisticY < best.y) return true;
+  if (optimisticY > best.y) return false;
+
+  const optimisticX = preferLeftmost
+    ? point.x - remaining * bounds.maxLeftGain
+    : point.x + remaining * bounds.maxRightGain;
+
+  return (
+    compareBackwardPredecessors(
+      { x: optimisticX, y: optimisticY },
+      best,
+      preferLeftmost
+    ) < 0
+  );
+}
+
 function getImmediatePredecessors(
   target: Point,
   config: BacktraceConfig,
@@ -719,62 +780,90 @@ export function traceBackwardPath(
   const preferLeftmost = config.partialTraceLeftmost !== false;
   const targetKey = `${target.x},${target.y}`;
   const maxVisited = Math.max(limit + 1, Math.floor(config.backtraceLimit));
+  const bounds = getBackwardSearchBounds(target, config);
 
-  const queue: Array<{ point: Point; depth: number }> = [
-    { point: target, depth: 0 },
-  ];
+  const stack: number[] = [0];
   const seen = new Set<string>([targetKey]);
-  const parentByKey = new Map<string, string | null>([[targetKey, null]]);
-  const pointByKey = new Map<string, Point>([[targetKey, target]]);
+  const nodePoints: Point[] = [target];
+  const nodeDepths: number[] = [0];
+  const parentIndices: number[] = [-1];
 
-  let qHead = 0;
-  let best = target;
+  let bestIndex = 0;
 
-  while (qHead < queue.length && seen.size < maxVisited) {
-    const { point, depth } = queue[qHead];
-    qHead += 1;
+  while (stack.length > 0 && seen.size < maxVisited) {
+    const index = stack.pop();
+    if (index === undefined) break;
 
-    if (compareBackwardPredecessors(point, best, preferLeftmost) < 0) {
-      best = point;
+    const point = nodePoints[index];
+    const depth = nodeDepths[index];
+
+    if (
+      compareBackwardPredecessors(
+        point,
+        nodePoints[bestIndex],
+        preferLeftmost
+      ) < 0
+    ) {
+      bestIndex = index;
     }
 
     if (depth >= limit) continue;
+    if (
+      !canBackwardBranchBeatBest(
+        point,
+        depth,
+        limit,
+        nodePoints[bestIndex],
+        preferLeftmost,
+        bounds
+      )
+    ) {
+      continue;
+    }
 
     const predecessors = getImmediatePredecessors(point, config).sort((a, b) =>
       compareBackwardPredecessors(a, b, preferLeftmost)
     );
 
-    for (const predecessor of predecessors) {
+    for (let i = predecessors.length - 1; i >= 0; i -= 1) {
+      const predecessor = predecessors[i];
+      if (
+        !canBackwardBranchBeatBest(
+          predecessor,
+          depth + 1,
+          limit,
+          nodePoints[bestIndex],
+          preferLeftmost,
+          bounds
+        )
+      ) {
+        continue;
+      }
+
       const key = `${predecessor.x},${predecessor.y}`;
       if (seen.has(key)) continue;
 
       seen.add(key);
-      parentByKey.set(key, `${point.x},${point.y}`);
-      pointByKey.set(key, predecessor);
-      queue.push({ point: predecessor, depth: depth + 1 });
-
-      if (compareBackwardPredecessors(predecessor, best, preferLeftmost) < 0) {
-        best = predecessor;
-      }
+      nodePoints.push(predecessor);
+      nodeDepths.push(depth + 1);
+      parentIndices.push(index);
+      stack.push(nodePoints.length - 1);
 
       if (seen.size >= maxVisited) break;
     }
   }
 
-  const bestKey = `${best.x},${best.y}`;
-  if (bestKey === targetKey) return [target];
+  if (bestIndex === 0) return [target];
 
   const reversed: Point[] = [];
-  let currentKey: string | null = bestKey;
-  while (currentKey) {
-    const point = pointByKey.get(currentKey);
-    if (!point) break;
-    reversed.push(point);
-    currentKey = parentByKey.get(currentKey) ?? null;
+  let currentIndex = bestIndex;
+  while (currentIndex >= 0) {
+    reversed.push(nodePoints[currentIndex]);
+    currentIndex = parentIndices[currentIndex] ?? -1;
   }
 
   reversed.reverse();
-  return reversed.length > 0 ? reversed : [target];
+  return reversed;
 }
 
 /**
